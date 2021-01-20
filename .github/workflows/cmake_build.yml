@@ -15,6 +15,7 @@ on:
     # Remove the "#" from the next 2 lines if you need to disable this action
     #branches:
     #  - disable
+  workflow_dispatch:
 
 #
 # Global environment variables
