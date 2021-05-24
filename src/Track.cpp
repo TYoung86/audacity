@@ -21,11 +21,11 @@ and TimeTrack.
 
 *//*******************************************************************/
 
-#include "Audacity.h" // for USE_* macros
+
 
 #include "Track.h"
 
-#include "Experimental.h"
+
 
 #include <algorithm>
 #include <numeric>
@@ -137,7 +137,7 @@ void Track::SetOwner
 (const std::weak_ptr<TrackList> &list, TrackNodePointer node)
 {
    // BUG: When using this function to clear an owner, we may need to clear
-   // focussed track too.  Otherwise focus could remain on an invisible (or deleted) track.
+   // focused track too.  Otherwise focus could remain on an invisible (or deleted) track.
    mList = list;
    mNode = node;
 }
@@ -1222,6 +1222,11 @@ std::shared_ptr<const Track> Track::SubstituteOriginalTrack() const
       }
    }
    return SharedPointer();
+}
+
+bool Track::SupportsBasicEditing() const
+{
+   return true;
 }
 
 auto Track::GetIntervals() const -> ConstIntervals

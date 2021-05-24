@@ -93,10 +93,10 @@ for registering for changes.
 *//******************************************************************/
 
 
-#include "Audacity.h"
+
 #include "ShuttleGui.h"
 
-#include "Experimental.h"
+
 
 #include "Prefs.h"
 #include "ShuttlePrefs.h"
@@ -114,6 +114,7 @@ for registering for changes.
 #include <wx/stattext.h>
 #include <wx/bmpbuttn.h>
 #include "../include/audacity/ComponentInterface.h"
+#include "widgets/ReadOnlyText.h"
 #include "widgets/wxPanelWrapper.h"
 #include "widgets/wxTextCtrlWrapper.h"
 #include "AllThemeResources.h"
@@ -483,6 +484,27 @@ wxStaticText * ShuttleGuiBase::AddVariableText(
       else
          UpdateSizers();
    return pStatic;
+}
+
+ReadOnlyText * ShuttleGuiBase::AddReadOnlyText(
+   const TranslatableString &Caption, const wxString &Value)
+{
+   const auto translated = Caption.Translation();
+   auto style = GetStyle( wxBORDER_NONE );
+   HandleOptionality( Caption );
+   mItem.miStyle = wxALIGN_CENTER_VERTICAL;
+   AddPrompt( Caption );
+   UseUpId();
+   if( mShuttleMode != eIsCreating )
+      return wxDynamicCast(wxWindow::FindWindowById( miId, mpDlg), ReadOnlyText);
+   ReadOnlyText * pReadOnlyText;
+   miProp=0;
+
+   mpWind = pReadOnlyText = safenew ReadOnlyText(GetParent(), miId, Value,
+      wxDefaultPosition, wxDefaultSize, GetStyle( style ));
+   mpWind->SetName(wxStripMenuCodes(translated));
+   UpdateSizers();
+   return pReadOnlyText;
 }
 
 wxComboBox * ShuttleGuiBase::AddCombo(
@@ -1763,7 +1785,7 @@ The repeated choice logic can then be taken out of those
 functions.
 
 JKC: This paves the way for doing data validation too,
-though when we add that we wil need to renumber the
+though when we add that we will need to renumber the
 steps.
 */
 bool ShuttleGuiBase::DoStep( int iStep )
@@ -1793,7 +1815,7 @@ bool ShuttleGuiBase::DoStep( int iStep )
 /// between gui and stack variable and stack variable and shuttle.
 wxCheckBox * ShuttleGuiBase::TieCheckBox(
    const TranslatableString &Prompt,
-   const SettingSpec< bool > &Setting)
+   const BoolSetting &Setting)
 {
    wxCheckBox * pCheck=NULL;
 
@@ -1810,7 +1832,7 @@ wxCheckBox * ShuttleGuiBase::TieCheckBox(
 /// between gui and stack variable and stack variable and shuttle.
 wxCheckBox * ShuttleGuiBase::TieCheckBoxOnRight(
    const TranslatableString &Prompt,
-   const SettingSpec< bool > &Setting)
+   const BoolSetting & Setting)
 {
    wxCheckBox * pCheck=NULL;
 
@@ -1827,7 +1849,7 @@ wxCheckBox * ShuttleGuiBase::TieCheckBoxOnRight(
 /// between gui and stack variable and stack variable and shuttle.
 wxSlider * ShuttleGuiBase::TieSlider(
    const TranslatableString &Prompt,
-   const SettingSpec< int > &Setting,
+   const IntSetting & Setting,
    const int max,
    const int min)
 {
@@ -1846,7 +1868,7 @@ wxSlider * ShuttleGuiBase::TieSlider(
 /// between gui and stack variable and stack variable and shuttle.
 wxSpinCtrl * ShuttleGuiBase::TieSpinCtrl(
    const TranslatableString &Prompt,
-   const SettingSpec< int > &Setting,
+   const IntSetting &Setting,
    const int max,
    const int min)
 {
@@ -1865,7 +1887,7 @@ wxSpinCtrl * ShuttleGuiBase::TieSpinCtrl(
 /// between gui and stack variable and stack variable and shuttle.
 wxTextCtrl * ShuttleGuiBase::TieTextBox(
    const TranslatableString & Prompt,
-   const SettingSpec< wxString > &Setting,
+   const StringSetting & Setting,
    const int nChars)
 {
    wxTextCtrl * pText=(wxTextCtrl*)NULL;
@@ -1883,7 +1905,7 @@ wxTextCtrl * ShuttleGuiBase::TieTextBox(
 /// This one does it for double values...
 wxTextCtrl * ShuttleGuiBase::TieIntegerTextBox(
    const TranslatableString & Prompt,
-   const SettingSpec< int > &Setting,
+   const IntSetting &Setting,
    const int nChars)
 {
    wxTextCtrl * pText=(wxTextCtrl*)NULL;
@@ -1901,7 +1923,7 @@ wxTextCtrl * ShuttleGuiBase::TieIntegerTextBox(
 /// This one does it for double values...
 wxTextCtrl * ShuttleGuiBase::TieNumericTextBox(
    const TranslatableString & Prompt,
-   const SettingSpec< double > &Setting,
+   const DoubleSetting & Setting,
    const int nChars)
 {
    wxTextCtrl * pText=(wxTextCtrl*)NULL;
@@ -1962,7 +1984,7 @@ wxChoice *ShuttleGuiBase::TieChoice(
 ///                             if null, then use 0, 1, 2, ...
 wxChoice * ShuttleGuiBase::TieNumberAsChoice(
    const TranslatableString &Prompt,
-   const SettingSpec< int > &Setting,
+   const IntSetting & Setting,
    const TranslatableStrings & Choices,
    const std::vector<int> * pInternalChoices,
    int iNoMatchSelector)
@@ -2293,6 +2315,8 @@ std::unique_ptr<wxSizer> CreateStdButtonSizer(wxWindow *parent, long buttons, wx
       bs->AddButton(safenew wxButton(parent, wxID_CANCEL, XO("&Close").Translation()));
    }
 
+#if defined(__WXMSW__)
+   // See below for explanation
    if( buttons & eHelpButton )
    {
       // Replace standard Help button with smaller icon button.
@@ -2302,6 +2326,7 @@ std::unique_ptr<wxSizer> CreateStdButtonSizer(wxWindow *parent, long buttons, wx
       b->SetLabel(XO("Help").Translation());       // for screen readers
       bs->AddButton( b );
    }
+#endif
 
    if (buttons & ePreviewButton)
    {
@@ -2328,27 +2353,48 @@ std::unique_ptr<wxSizer> CreateStdButtonSizer(wxWindow *parent, long buttons, wx
    bs->AddStretchSpacer();
    bs->Realize();
 
+   size_t lastLastSpacer = 0;
+   size_t lastSpacer = 0;
+   wxSizerItemList & list = bs->GetChildren();
+   for( size_t i = 0, cnt = list.size(); i < cnt; i++ )
+   {
+      if( list[i]->IsSpacer() )
+      {
+         lastSpacer = i;
+      }
+      else
+      {
+         lastLastSpacer = lastSpacer;
+      }
+   }
+
    // Add any buttons that need to cuddle up to the right hand cluster
    if( buttons & eDebugButton )
    {
-      size_t lastLastSpacer = 0;
-      size_t lastSpacer = 0;
-      wxSizerItemList & list = bs->GetChildren();
-      for( size_t i = 0, cnt = list.size(); i < cnt; i++ )
-      {
-         if( list[i]->IsSpacer() )
-         {
-            lastSpacer = i;
-         }
-         else  
-         {
-            lastLastSpacer = lastSpacer;
-         }
-      }
-
       b = safenew wxButton(parent, eDebugID, XO("Debu&g").Translation());
-      bs->Insert( lastLastSpacer + 1, b, 0, wxALIGN_CENTER | wxLEFT | wxRIGHT, margin );
+      bs->Insert( ++lastLastSpacer, b, 0, wxALIGN_CENTER | wxLEFT | wxRIGHT, margin );
    }
+
+#if !defined(__WXMSW__)
+   // Bug #2432: Couldn't find GTK guidelines, but Mac HIGs state:
+   //
+   //    View style 	                                          Help button position
+   //    Dialog with dismissal buttons (like OK and Cancel). 	Lower-left corner, vertically aligned with the dismissal buttons.
+   //    Dialog without dismissal buttons. 	                  Lower-left or lower-right corner.
+   //    Preference window or pane. 	                        Lower-left or lower-right corner.
+   //
+   // So, we're gonna cheat a little and use the lower-right corner.
+   if( buttons & eHelpButton )
+   {
+      // Replace standard Help button with smaller icon button.
+      // bs->AddButton(safenew wxButton(parent, wxID_HELP));
+      b = safenew wxBitmapButton(parent, wxID_HELP, theTheme.Bitmap( bmpHelpIcon ));
+      b->SetToolTip( XO("Help").Translation() );
+      b->SetLabel(XO("Help").Translation());       // for screen readers
+      bs->Add( b, 0, wxALIGN_CENTER );
+   }
+#endif
+
 
    auto s = std::make_unique<wxBoxSizer>( wxVERTICAL );
    s->Add( bs.release(), 1, wxEXPAND | wxALL, 7 );

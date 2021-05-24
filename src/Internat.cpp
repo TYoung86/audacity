@@ -22,7 +22,7 @@ and on Mac OS X for the filesystem.
 
 #include "Internat.h"
 
-#include "Experimental.h"
+
 #include "MemoryX.h"
 
 #include <wx/log.h>
@@ -103,8 +103,14 @@ void Internat::Init()
    // or to directories
    auto forbid = wxFileName::GetForbiddenChars(format);
 
-   for(auto cc: forbid)
+   for (auto cc: forbid) {
+#if defined(__WXGTK__)
+      if (cc == wxT('*') || cc == wxT('?')) {
+         continue;
+      }
+#endif
       exclude.push_back(wxString{ cc });
+   }
 
    // The path separators may not be forbidden, so add them
    //auto separators = wxFileName::GetPathSeparators(format);
@@ -117,6 +123,13 @@ void Internat::Init()
          exclude.push_back(wxString{ cc });
    }
 }
+
+void Internat::SetCeeNumberFormat()
+{
+   wxSetlocale( LC_NUMERIC, "C" );
+   mDecimalSeparator = '.';
+}
+
 
 wxChar Internat::GetDecimalSeparator()
 {
@@ -321,7 +334,10 @@ TranslatableString &TranslatableString::Strip( unsigned codes ) &
          default: {
             bool debug = request == Request::DebugFormat;
             auto result =
-               TranslatableString::DoSubstitute( prevFormatter, str, debug );
+               TranslatableString::DoSubstitute(
+                  prevFormatter,
+                  str, TranslatableString::DoGetContext( prevFormatter ),
+                  debug );
             if ( codes & MenuCodes )
                result = wxStripMenuCodes( result );
             if ( codes & Ellipses ) {
@@ -344,13 +360,13 @@ wxString TranslatableString::DoGetContext( const Formatter &formatter )
    return formatter ? formatter( {}, Request::Context ) : wxString{};
 }
 
-wxString TranslatableString::DoSubstitute(
-   const Formatter &formatter, const wxString &format, bool debug )
+wxString TranslatableString::DoSubstitute( const Formatter &formatter,
+   const wxString &format, const wxString &context, bool debug )
 {
    return formatter
       ? formatter( format, debug ? Request::DebugFormat : Request::Format )
       : // come here for most translatable strings, which have no formatting
-         ( debug ? format : wxGetTranslation( format ) );
+         ( debug ? format : wxGetTranslation( format, wxString{}, context ) );
 }
 
 wxString TranslatableString::DoChooseFormat(
@@ -391,7 +407,9 @@ TranslatableString &TranslatableString::Join(
          default: {
             bool debug = request == Request::DebugFormat;
             return
-               TranslatableString::DoSubstitute( prevFormatter, str, debug )
+               TranslatableString::DoSubstitute( prevFormatter,
+                  str, TranslatableString::DoGetContext( prevFormatter ),
+                  debug )
                   + separator
                   + arg.DoFormat( debug );
          }

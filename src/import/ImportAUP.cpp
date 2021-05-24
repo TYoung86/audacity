@@ -17,7 +17,7 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
+
 
 #include "Import.h"
 #include "ImportPlugin.h"
@@ -32,7 +32,6 @@
 #include "../Prefs.h"
 #include "../Project.h"
 #include "../ProjectFileIO.h"
-#include "../ProjectFileIORegistry.h"
 #include "../ProjectFileManager.h"
 #include "../ProjectHistory.h"
 #include "../ProjectSelectionManager.h"
@@ -674,7 +673,7 @@ bool AUPImportFileHandle::HandleProject(XMLTagHandler *&handler)
       }
       else if (!wxStrcmp(attr, wxT("h")))
       {
-         if (!Internat::CompatibleToDouble(value, &dValue) || (dValue < 0.0))
+         if (!Internat::CompatibleToDouble(value, &dValue))
          {
             return SetError(XO("Invalid project 'h' attribute."));
          }
@@ -743,7 +742,7 @@ bool AUPImportFileHandle::HandleProject(XMLTagHandler *&handler)
          requiredTags++;
 
          mProjDir = mFilename;
-         wxString altname = mProjDir.GetName() + wxT("-data");
+         wxString altname = mProjDir.GetName() + wxT("_data");
          mProjDir.SetFullName(wxEmptyString);
 
          wxString projName = value;
@@ -778,7 +777,7 @@ bool AUPImportFileHandle::HandleProject(XMLTagHandler *&handler)
          if (projName.empty())
          {
             AudacityMessageBox(
-               XO("Couldn't find the project data folder: \"%s\"").Format(*value),
+               XO("Couldn't find the project data folder: \"%s\"").Format(value),
                XO("Error Opening Project"),
                wxOK | wxCENTRE,
                &window);
@@ -1096,6 +1095,15 @@ bool AUPImportFileHandle::HandleSequence(XMLTagHandler *&handler)
    struct node node = mHandlers.back();
 
    WaveClip *waveclip = static_cast<WaveClip *>(node.handler);
+
+   // Earlier versions of Audacity had a single implied waveclip, so for
+   // these versions, we get or create the only clip in the track.
+   if (mParentTag.IsSameAs(wxT("wavetrack")))
+   {
+      XMLTagHandler *dummy;
+      HandleWaveClip(dummy);
+      waveclip = mClip;
+   }
 
    while(*mAttrs)
    {

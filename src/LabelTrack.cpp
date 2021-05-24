@@ -28,13 +28,13 @@ for drawing different aspects of the label and its text box.
 
 *//*******************************************************************/
 
-#include "Audacity.h" // for HAVE_GTK
+
 #include "LabelTrack.h"
 
 #include "tracks/ui/TrackView.h"
 #include "tracks/ui/TrackControls.h"
 
-#include "Experimental.h"
+
 
 #include <stdio.h>
 #include <algorithm>
@@ -83,6 +83,13 @@ LabelTrack::LabelTrack(const LabelTrack &orig) :
       LabelStruct l { original.selectedRegion, original.title };
       mLabels.push_back(l);
    }
+}
+
+Track::Holder LabelTrack::PasteInto( AudacityProject & ) const
+{
+   auto pNewTrack = std::make_shared<LabelTrack>();
+   pNewTrack->Paste(0.0, this);
+   return pNewTrack;
 }
 
 template<typename IntervalType>

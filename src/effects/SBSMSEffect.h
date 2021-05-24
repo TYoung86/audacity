@@ -14,12 +14,12 @@
 #ifndef __AUDACITY_EFFECT_SBSMS__
 #define __AUDACITY_EFFECT_SBSMS__
 
-#include "../Audacity.h" // for USE_* macros
+
 
 #if USE_SBSMS
 
 #include "Effect.h"
-#include "../../../lib-src/header-substitutes/sbsms.h"
+#include <sbsms.h>
 
 using namespace _sbsms_;
 

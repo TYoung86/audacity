@@ -12,7 +12,7 @@ effect that uses SoundTouch to do its processing (ChangeTempo
 
 **********************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
+
 
 #if USE_SOUNDTOUCH
 #include "SoundTouchEffect.h"
@@ -115,6 +115,11 @@ bool EffectSoundTouch::ProcessWithTimeWarper(InitFunction initer,
          mCurT0 = mT0;
          mCurT1 = mT1;
 
+         //Set the current bounds to whichever left marker is
+         //greater and whichever right marker is less
+         mCurT0 = wxMax(mT0, mCurT0);
+         mCurT1 = wxMin(mT1, mCurT1);
+
          // Process only if the right marker is to the right of the left marker
          if (mCurT1 > mCurT0) {
             mSoundTouch = std::make_unique<soundtouch::SoundTouch>();
@@ -171,11 +176,9 @@ bool EffectSoundTouch::ProcessWithTimeWarper(InitFunction initer,
       }
    );
 
-   if (bGoodResult)
+   if (bGoodResult) {
       ReplaceProcessedTracks(bGoodResult);
-
-//   mT0 = mCurT0;
-//   mT1 = mCurT0 + m_maxNewLength; // Update selection.
+   }
 
    return bGoodResult;
 }
@@ -210,8 +213,8 @@ bool EffectSoundTouch::ProcessOne(WaveTrack *track,
       auto s = start;
       while (s < end) {
          //Get a block of samples (smaller than the size of the buffer)
-         const auto block =
-            limitSampleBufferSize( track->GetBestBlockSize(s), end - s );
+         const auto block = wxMin(8192,
+            limitSampleBufferSize( track->GetBestBlockSize(s), end - s ));
 
          //Get the samples from the track and put them in the buffer
          track->Get((samplePtr)buffer.get(), floatSample, s, block);
@@ -400,7 +403,7 @@ void EffectSoundTouch::Finalize(WaveTrack* orig, WaveTrack* out, const TimeWarpe
    // Silenced samples will be inserted in gaps between clips, so capture where these
    // gaps are for later deletion
    std::vector<std::pair<double, double>> gaps;
-   double last = 0.0;
+   double last = mCurT0;
    auto clips = orig->SortedClipArray();
    auto front = clips.front();
    auto back = clips.back();
@@ -412,11 +415,12 @@ void EffectSoundTouch::Finalize(WaveTrack* orig, WaveTrack* out, const TimeWarpe
          if (mCurT0 < st && clip == front) {
             gaps.push_back(std::make_pair(mCurT0, st));
          }
-         if (mCurT1 > et && clip == back) {
-            gaps.push_back(std::make_pair(et, mCurT1));
-         }
-         if (last >= mCurT0) {
+         else if (last < st && mCurT0 <= last ) {
             gaps.push_back(std::make_pair(last, st));
+         }
+
+         if (et < mCurT1 && clip == back) {
+            gaps.push_back(std::make_pair(et, mCurT1));
          }
       }
       last = et;
@@ -429,7 +433,10 @@ void EffectSoundTouch::Finalize(WaveTrack* orig, WaveTrack* out, const TimeWarpe
    for (auto gap : gaps) {
       auto st = orig->LongSamplesToTime(orig->TimeToLongSamples(gap.first));
       auto et = orig->LongSamplesToTime(orig->TimeToLongSamples(gap.second));
-      orig->SplitDelete(warper.Warp(st), warper.Warp(et));
+      if (st >= mCurT0 && et <= mCurT1 && st != et)
+      {
+         orig->SplitDelete(warper.Warp(st), warper.Warp(et));
+      }
    }
 }
 

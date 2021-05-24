@@ -21,7 +21,7 @@ class Ruler;
 class ZoomInfo;
 struct TrackPanelDrawingContext;
 
-class TimeTrack final : public Track {
+class AUDACITY_DLL_API TimeTrack final : public Track {
 
  public:
 
@@ -39,6 +39,10 @@ class TimeTrack final : public Track {
 
    virtual ~TimeTrack();
 
+
+   bool SupportsBasicEditing() const override;
+
+   Holder PasteInto( AudacityProject & ) const override;
 
    Holder Cut( double t0, double t1 ) override;
    Holder Copy( double t0, double t1, bool forClipboard ) const override;
@@ -91,6 +95,8 @@ class TimeTrack final : public Track {
    Ruler &GetRuler() const { return *mRuler; }
 
  private:
+   void CleanState();
+
    // Identifying the type of track
    TrackKind GetKind() const override { return TrackKind::Time; }
 

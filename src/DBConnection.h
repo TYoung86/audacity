@@ -31,6 +31,8 @@ struct DBConnectionErrors
 {
    TranslatableString mLastError;
    TranslatableString mLibraryError;
+   int mErrorCode { 0 };
+   wxString mLog;
 };
 
 class DBConnection
@@ -46,7 +48,7 @@ public:
       CheckpointFailureCallback callback);
    ~DBConnection();
 
-   bool Open(const char *fileName);
+   int Open(const FilePath fileName);
    bool Close();
 
    //! throw and show appropriate message box
@@ -54,8 +56,8 @@ public:
       bool write //!< If true, a database update failed; if false, only a SELECT failed
    ) const;
 
-   bool SafeMode(const char *schema = "main");
-   bool FastMode(const char *schema = "main");
+   int SafeMode(const char *schema = "main");
+   int FastMode(const char *schema = "main");
 
    bool Assign(sqlite3 *handle);
    sqlite3 *Detach();
@@ -76,7 +78,6 @@ public:
       GetRootPage,
       GetDBPage
    };
-   sqlite3_stmt *GetStatement(enum StatementID id);
    sqlite3_stmt *Prepare(enum StatementID id, const char *sql);
 
    void SetBypass( bool bypass );
@@ -85,22 +86,26 @@ public:
    //! Just set stored errors
    void SetError(
       const TranslatableString &msg,
-      const TranslatableString &libraryError = {} );
+      const TranslatableString &libraryError = {}, 
+      int errorCode = {});
 
    //! Set stored errors and write to log; and default libraryError to what database library reports
    void SetDBError(
       const TranslatableString &msg,
-      const TranslatableString &libraryError = {} );
+      const TranslatableString& libraryError = {},
+      int errorCode = -1);
 
 private:
-   bool ModeConfig(sqlite3 *db, const char *schema, const char *config);
+   int OpenStepByStep(const FilePath fileName);
+   int ModeConfig(sqlite3 *db, const char *schema, const char *config);
 
-   void CheckpointThread();
+   void CheckpointThread(sqlite3 *db, const FilePath &fileName);
    static int CheckpointHook(void *data, sqlite3 *db, const char *schema, int pages);
 
 private:
    std::weak_ptr<AudacityProject> mpProject;
    sqlite3 *mDB;
+   sqlite3 *mCheckpointDB;
 
    std::thread mCheckpointThread;
    std::condition_variable mCheckpointCondition;
@@ -109,7 +114,9 @@ private:
    std::atomic_bool mCheckpointPending{ false };
    std::atomic_bool mCheckpointActive{ false };
 
-   std::map<enum StatementID, sqlite3_stmt *> mStatements;
+   std::mutex mStatementMutex;
+   using StatementIndex = std::pair<enum StatementID, std::thread::id>;
+   std::map<StatementIndex, sqlite3_stmt *> mStatements;
 
    std::shared_ptr<DBConnectionErrors> mpErrors;
    CheckpointFailureCallback mCallback;
@@ -124,7 +131,7 @@ private:
     Commit() must not be called again after one successful call.
     An exception is thrown from the constructor if the transaction cannot open.
  */
-class TransactionScope
+class AUDACITY_DLL_API TransactionScope
 {
 public:
    TransactionScope(DBConnection &connection, const char *name);

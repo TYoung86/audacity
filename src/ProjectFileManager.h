@@ -24,12 +24,11 @@ class Track;
 class TrackList;
 class WaveTrack;
 class XMLTagHandler;
-namespace ProjectFileIORegistry{ struct Entry; }
 
 using WaveTrackArray = std::vector < std::shared_ptr < WaveTrack > >;
 using TrackHolders = std::vector< WaveTrackArray >;
 
-class ProjectFileManager final
+class AUDACITY_DLL_API ProjectFileManager final
    : public ClientData::Base
 {
 public:
@@ -56,11 +55,12 @@ public:
 
    bool OpenProject();
    void CloseProject();
+   bool OpenNewProject();
 
    void CompactProjectOnClose();
 
    bool Save();
-   bool SaveAs();
+   bool SaveAs(bool allowOverwrite = false);
    bool SaveAs(const FilePath &newFileName, bool addToHistory = true);
    // strProjectPathName is full path for aup except extension
    bool SaveFromTimerRecording( wxFileName fnFile );

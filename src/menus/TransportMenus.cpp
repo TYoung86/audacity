@@ -1,5 +1,4 @@
-#include "../Audacity.h"
-#include "../Experimental.h"
+
 
 #include "../AdornedRulerPanel.h"
 #include "../AudioIO.h"
@@ -52,7 +51,7 @@ void PlayCurrentRegionAndWait(const CommandContext &context,
 
    projectAudioManager.PlayCurrentRegion(looped, cutpreview);
 
-   if (project.mBatchMode > 0 && t0 != t1) {
+   if (project.mBatchMode > 0 && t0 != t1 && !looped) {
       wxYieldIfNeeded();
 
       /* i18n-hint: This title appears on a dialog that indicates the progress
@@ -530,8 +529,8 @@ void OnPunchAndRoll(const CommandContext &context)
    auto tracks =
       ProjectAudioManager::ChooseExistingRecordingTracks(project, true, rateOfSelected);
    if (tracks.empty()) {
-      int recordingChannels =
-         std::max(0L, gPrefs->Read(wxT("/AudioIO/RecordChannels"), 2));
+      auto recordingChannels =
+         std::max(0, AudioIORecordChannels.Read());
       auto message =
          (recordingChannels == 1)
          ? XO("Please select in a mono track.")

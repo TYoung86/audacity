@@ -50,22 +50,21 @@
 *//*******************************************************************/
 
 
-#include "Audacity.h"
+
 #include "Prefs.h"
 
 #include <wx/defs.h>
 #include <wx/app.h>
 #include <wx/intl.h>
-#include <wx/fileconf.h>
 #include <wx/filename.h>
 #include <wx/stdpaths.h>
 
 #include "Internat.h"
 #include "MemoryX.h"
 
-std::unique_ptr<AudacityPrefs> ugPrefs {};
+std::unique_ptr<FileConfig> ugPrefs {};
 
-AudacityPrefs *gPrefs = NULL;
+FileConfig *gPrefs = nullptr;
 int gMenusDirty = 0;
 
 wxDEFINE_EVENT(EVT_PREFS_UPDATE, wxCommandEvent);
@@ -172,46 +171,11 @@ static void CopyEntriesRecursive(wxString path, wxConfigBase *src, wxConfigBase 
 }
 #endif
 
-AudacityPrefs::AudacityPrefs(const wxString& appName,
-               const wxString& vendorName,
-               const wxString& localFilename,
-               const wxString& globalFilename,
-               long style,
-               const wxMBConv& conv) :
-   wxFileConfig(appName,
-               vendorName,
-               localFilename,
-               globalFilename,
-               style,
-               conv)
+void InitPreferences( std::unique_ptr<FileConfig> uPrefs )
 {
-}
-
-
-
-void InitPreferences( const wxFileName &configFileName )
-{
-   wxString appName = wxTheApp->GetAppName();
-
-   ugPrefs = std::make_unique<AudacityPrefs>
-      (appName, wxEmptyString,
-       configFileName.GetFullPath(),
-       wxEmptyString, wxCONFIG_USE_LOCAL_FILE);
-   gPrefs = ugPrefs.get();
-
+   gPrefs = uPrefs.get();
+   ugPrefs = std::move(uPrefs);
    wxConfigBase::Set(gPrefs);
-}
-
-bool CheckWritablePreferences()
-{
-   return gPrefs->Write("/TEST", true) && gPrefs->Flush();
-}
-
-TranslatableString UnwritablePreferencesErrorMessage( const wxFileName &configFileName )
-{
-   return
-     XO("Audacity cannot start because the settings file at %s is not writable.")
-        .Format(configFileName.GetFullPath());
 }
 
 void FinishPreferences()
@@ -316,7 +280,7 @@ bool ChoiceSetting::Write( const wxString &value )
 }
 
 EnumSettingBase::EnumSettingBase(
-   const wxString &key,
+   const SettingBase &key,
    EnumValueSymbols symbols,
    long defaultSymbol,
 
@@ -433,4 +397,24 @@ void PreferenceInitializer::ReinitializeAll()
 {
    for ( auto pInitializer : allInitializers() )
       (*pInitializer)();
+}
+
+wxConfigBase *SettingBase::GetConfig() const
+{
+   return gPrefs;
+}
+
+bool SettingBase::Delete()
+{
+   auto config = GetConfig();
+   return config && config->DeleteEntry( GetPath() );
+}
+
+bool BoolSetting::Toggle()
+{
+   bool value = Read();
+   if ( Write( !value ) )
+      return !value;
+   else
+      return value;
 }

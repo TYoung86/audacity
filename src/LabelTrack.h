@@ -26,7 +26,7 @@ class TimeWarper;
 struct LabelTrackHit;
 struct TrackPanelDrawingContext;
 
-class LabelStruct
+class AUDACITY_DLL_API LabelStruct
 {
 public:
    LabelStruct() = default;
@@ -154,6 +154,8 @@ public:
 
    int FindNextLabel(const SelectedRegion& currentSelection);
    int FindPrevLabel(const SelectedRegion& currentSelection);
+
+   Track::Holder PasteInto( AudacityProject & ) const override;
 
    struct IntervalData final : Track::IntervalData {
       size_t index;

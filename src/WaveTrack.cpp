@@ -28,7 +28,7 @@ from the project that will own the track.
 
 #include "WaveTrack.h"
 
-#include "Experimental.h"
+
 
 #include "WaveClip.h"
 
@@ -44,7 +44,6 @@ from the project that will own the track.
 
 #include "Envelope.h"
 #include "Sequence.h"
-#include "Spectrum.h"
 
 #include "ProjectFileIORegistry.h"
 #include "ProjectSettings.h"
@@ -52,7 +51,7 @@ from the project that will own the track.
 #include "Prefs.h"
 
 #include "effects/TimeWarper.h"
-#include "prefs/QualityPrefs.h"
+#include "prefs/QualitySettings.h"
 #include "prefs/SpectrogramSettings.h"
 #include "prefs/TracksPrefs.h"
 #include "prefs/TracksBehaviorsPrefs.h"
@@ -86,7 +85,7 @@ WaveTrack::Holder WaveTrackFactory::DuplicateWaveTrack(const WaveTrack &orig)
 WaveTrack::Holder WaveTrackFactory::NewWaveTrack(sampleFormat format, double rate)
 {
    if (format == (sampleFormat)0)
-      format = QualityPrefs::SampleFormatChoice();
+      format = QualitySettings::SampleFormatChoice();
    if (rate == 0)
       rate = mSettings.GetRate();
    return std::make_shared<WaveTrack> ( mpFactory, format, rate );
@@ -332,6 +331,15 @@ static Container MakeIntervals(const std::vector<WaveClipHolder> &clips)
          std::make_unique<WaveTrack::IntervalData>( clip ) );
    }
    return result;
+}
+
+Track::Holder WaveTrack::PasteInto( AudacityProject &project ) const
+{
+   auto &trackFactory = WaveTrackFactory::Get( project );
+   auto &pSampleBlockFactory = trackFactory.GetSampleBlockFactory();
+   auto pNewTrack = EmptyCopy( pSampleBlockFactory );
+   pNewTrack->Paste(0.0, this);
+   return pNewTrack;
 }
 
 auto WaveTrack::GetIntervals() const -> ConstIntervals
@@ -908,8 +916,8 @@ void WaveTrack::ClearAndPaste(double t0, // Start of time to clear
       // Restore the envelope points
       for (auto point : envPoints) {
          auto t = warper->Warp(point.GetT());
-         WaveClip *clip = GetClipAtTime(t);
-         clip->GetEnvelope()->Insert(t, point.GetVal());
+         if (auto clip = GetClipAtTime(t))
+            clip->GetEnvelope()->Insert(t, point.GetVal());
       }
    }
 }
@@ -986,6 +994,9 @@ bool WaveTrack::AddClip(const std::shared_ptr<WaveClip> &clip)
 void WaveTrack::HandleClear(double t0, double t1,
                             bool addCutLines, bool split)
 {
+   // For debugging, use an ASSERT so that we stop
+   // closer to the problem.
+   wxASSERT( t1 >= t0 );
    if (t1 < t0)
       THROW_INCONSISTENCY_EXCEPTION;
 
@@ -2765,7 +2776,6 @@ void InspectBlocks(const TrackList &tracks, BlockInspector inspector,
 
 #include "Project.h"
 #include "SampleBlock.h"
-#include "ViewInfo.h"
 static auto TrackFactoryFactory = []( AudacityProject &project ) {
    return std::make_shared< WaveTrackFactory >(
       ProjectSettings::Get( project ),

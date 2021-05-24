@@ -11,10 +11,8 @@
 
 **********************************************************************/
 
-#include "../Audacity.h"
-#include "EffectUI.h"
 
-#include "../Experimental.h"
+#include "EffectUI.h"
 
 #include "Effect.h"
 #include "EffectManager.h"
@@ -27,10 +25,10 @@
 
 #include "../UndoManager.h"
 
+#include <wx/dcmemory.h>
 #include <wx/defs.h>
 #include <wx/bmpbuttn.h>
 #include <wx/button.h>
-#include <wx/dcmemory.h>
 #include <wx/frame.h>
 #include <wx/image.h>
 #include <wx/imaglist.h>
@@ -652,6 +650,7 @@ private:
 #include "../AudioIO.h"
 #include "../CommonCommandFlags.h"
 #include "../Menus.h"
+#include "../prefs/GUISettings.h" // for RTL_WORKAROUND
 #include "../Project.h"
 #include "../ProjectAudioManager.h"
 #include "../ShuttleGui.h"
@@ -1925,6 +1924,7 @@ wxDialog *EffectUI::DialogFactory( wxWindow &parent, EffectHostInterface *pHost,
          EffectRack::Get( context.project ).Add(effect);
       }
 #endif
+      effect->SetUIFlags(flags);
       success = effect->DoEffect(
          rate,
          &tracks,
@@ -1959,23 +1959,32 @@ wxDialog *EffectUI::DialogFactory( wxWindow &parent, EffectHostInterface *pHost,
          /* i18n-hint: %s will be the name of the effect which will be
           * repeated if this menu item is chosen */
          auto lastEffectDesc = XO("Repeat %s").Format(shortDesc);
+         auto& menuManager = MenuManager::Get(project);
          switch ( type ) {
          case EffectTypeGenerate:
             commandManager.Modify(wxT("RepeatLastGenerator"), lastEffectDesc);
-            MenuManager::Get(project).mLastGenerator = ID;
+            menuManager.mLastGenerator = ID;
+            menuManager.mRepeatGeneratorFlags = EffectManager::kConfigured;
             break;
          case EffectTypeProcess:
             commandManager.Modify(wxT("RepeatLastEffect"), lastEffectDesc);
-            MenuManager::Get(project).mLastEffect = ID;
+            menuManager.mLastEffect = ID;
+            menuManager.mRepeatEffectFlags = EffectManager::kConfigured;
             break;
          case EffectTypeAnalyze:
             commandManager.Modify(wxT("RepeatLastAnalyzer"), lastEffectDesc);
-            MenuManager::Get(project).mLastAnalyzer = ID;
+            menuManager.mLastAnalyzer = ID;
+            menuManager.mLastAnalyzerRegistration = MenuCreator::repeattypeplugin;
+            menuManager.mRepeatAnalyzerFlags = EffectManager::kConfigured;
             break;
          case EffectTypeTool:
             commandManager.Modify(wxT("RepeatLastTool"), lastEffectDesc);
-            MenuManager::Get(project).mLastTool = ID;
-            MenuManager::Get(project).mLastToolIsMacro = false;
+            menuManager.mLastTool = ID;
+            menuManager.mLastToolRegistration = MenuCreator::repeattypeplugin;
+            menuManager.mRepeatToolFlags = EffectManager::kConfigured;
+            if (shortDesc == NYQUIST_PROMPT_NAME) {
+               menuManager.mRepeatToolFlags = EffectManager::kRepeatNyquistPrompt;  //Nyquist Prompt is not configured
+            }
             break;
       }
    }

@@ -8,10 +8,8 @@ Paul Licameli split from WaveTrackView.cpp
 
 **********************************************************************/
 
-#include "../../../../Audacity.h"
-#include "SpectrumView.h"
 
-#include "../../../../Experimental.h"
+#include "SpectrumView.h"
 
 #include "SpectrumVRulerControls.h"
 #include "WaveTrackView.h"
@@ -62,7 +60,7 @@ void SpectrumView::DoSetMinimized( bool minimized )
 #ifdef EXPERIMENTAL_HALF_WAVE
    bool bHalfWave;
    gPrefs->Read(wxT("/GUI/CollapseToHalfWave"), &bHalfWave, false);
-   if( bHalfWave )
+   if( bHalfWave && minimized)
    {
       // It is all right to set the top of scale to a huge number,
       // not knowing the track rate here -- because when retrieving the

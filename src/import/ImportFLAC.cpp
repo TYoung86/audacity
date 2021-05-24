@@ -22,9 +22,7 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
 
-#include "../Experimental.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
@@ -35,7 +33,7 @@
 #endif
 
 #include <wx/defs.h>
-#include <wx/intl.h>    // needed for _("translated stings") even if we
+#include <wx/intl.h>    // needed for _("translated strings") even if we
                         // don't have libflac available
 
 #include "Import.h"
@@ -440,18 +438,39 @@ ProgressResult FLACImportFileHandle::Import(WaveTrackFactory *trackFactory,
    if (!mChannels.empty())
       outTracks.push_back(std::move(mChannels));
 
-   tags->Clear();
+   wxString comment;
+   wxString description;
+
    size_t cnt = mFile->mComments.size();
-   for (size_t c = 0; c < cnt; c++) {
-      wxString name = mFile->mComments[c].BeforeFirst(wxT('='));
-      wxString value = mFile->mComments[c].AfterFirst(wxT('='));
-      if (name.Upper() == wxT("DATE") && !tags->HasTag(TAG_YEAR)) {
-         long val;
-         if (value.length() == 4 && value.ToLong(&val)) {
-            name = TAG_YEAR;
+   if (cnt > 0) {
+      tags->Clear();
+      for (size_t c = 0; c < cnt; c++) {
+         wxString name = mFile->mComments[c].BeforeFirst(wxT('='));
+         wxString value = mFile->mComments[c].AfterFirst(wxT('='));
+         wxString upper = name.Upper();
+         if (upper == wxT("DATE") && !tags->HasTag(TAG_YEAR)) {
+            long val;
+            if (value.length() == 4 && value.ToLong(&val)) {
+               name = TAG_YEAR;
+            }
          }
+         else if (upper == wxT("COMMENT") || upper == wxT("COMMENTS")) {
+            comment = value;
+            continue;
+         }
+         else if (upper == wxT("DESCRIPTION")) {
+            description = value;
+            continue;
+         }
+         tags->SetTag(name, value);
       }
-      tags->SetTag(name, value);
+
+      if (comment.empty()) {
+         comment = description;
+      }
+      if (!comment.empty()) {
+         tags->SetTag(TAG_COMMENTS, comment);
+      }
    }
 
    return mUpdateResult;

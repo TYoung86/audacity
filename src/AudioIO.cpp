@@ -413,10 +413,10 @@ time warp info and AudioIOListener and whether the playback is looped.
 
 *//*******************************************************************/
 
-#include "Audacity.h" // for USE_* macros
+
 #include "AudioIO.h"
 
-#include "Experimental.h"
+
 
 #include "AudioIOListener.h"
 
@@ -466,12 +466,11 @@ time warp info and AudioIOListener and whether the playback is looped.
 #include "WaveTrack.h"
 
 #include "effects/RealtimeEffectManager.h"
-#include "prefs/QualityPrefs.h"
+#include "prefs/QualitySettings.h"
 #include "prefs/RecordingPrefs.h"
 #include "widgets/MeterPanelBase.h"
 #include "widgets/AudacityMessageBox.h"
 #include "widgets/ErrorDialog.h"
-#include "widgets/Warning.h"
 
 #ifdef EXPERIMENTAL_MIDI_OUT
 
@@ -924,8 +923,8 @@ void AudioIO::Init()
       int i = getRecordDevIndex();
       const PaDeviceInfo *info = Pa_GetDeviceInfo(i);
       if (info) {
-         gPrefs->Write(wxT("/AudioIO/RecordingDevice"), DeviceName(info));
-         gPrefs->Write(wxT("/AudioIO/Host"), HostName(info));
+         AudioIORecordingDevice.Write(DeviceName(info));
+         AudioIOHost.Write(HostName(info));
       }
    }
 
@@ -933,8 +932,8 @@ void AudioIO::Init()
       int i = getPlayDevIndex();
       const PaDeviceInfo *info = Pa_GetDeviceInfo(i);
       if (info) {
-         gPrefs->Write(wxT("/AudioIO/PlaybackDevice"), DeviceName(info));
-         gPrefs->Write(wxT("/AudioIO/Host"), HostName(info));
+         AudioIOPlaybackDevice.Write(DeviceName(info));
+         AudioIOHost.Write(HostName(info));
       }
    }
 
@@ -1278,8 +1277,7 @@ bool AudioIO::StartPortAudioStream(const AudioIOStartStreamOptions &options,
    PaStreamParameters playbackParameters{};
    PaStreamParameters captureParameters{};
 
-   double latencyDuration = DEFAULT_LATENCY_DURATION;
-   gPrefs->Read(wxT("/AudioIO/LatencyDuration"), &latencyDuration);
+   auto latencyDuration = AudioIOLatencyDuration.Read();
 
    if( numPlaybackChannels > 0)
    {
@@ -1447,9 +1445,8 @@ void AudioIO::StartMonitoring( const AudioIOStartStreamOptions &options )
       return;
 
    bool success;
-   long captureChannels;
-   auto captureFormat = QualityPrefs::SampleFormatChoice();
-   gPrefs->Read(wxT("/AudioIO/RecordChannels"), &captureChannels, 2L);
+   auto captureFormat = QualitySettings::SampleFormatChoice();
+   auto captureChannels = AudioIORecordChannels.Read();
    gPrefs->Read(wxT("/AudioIO/SWPlaythrough"), &mSoftwarePlaythrough, false);
    int playbackChannels = 0;
 
@@ -1527,7 +1524,7 @@ int AudioIO::StartStream(const TransportTracks &tracks,
 #ifdef __WXGTK__
    // Detect whether ALSA is the chosen host, and do the various involved MIDI
    // timing compensations only then.
-   mUsingAlsa = (gPrefs->Read(wxT("/AudioIO/Host"), wxT("")) == "ALSA");
+   mUsingAlsa = (AudioIOHost.Read() == L"ALSA");
 #endif
 
    gPrefs->Read(wxT("/AudioIO/SWPlaythrough"), &mSoftwarePlaythrough, false);
@@ -1550,16 +1547,14 @@ int AudioIO::StartStream(const TransportTracks &tracks,
       // gPrefs->Write(wxT("/AudioIO/SilenceLevel"), silenceLevelDB);
       // gPrefs->Flush();
    }
-   mSilenceLevel = (silenceLevelDB + dBRange)/(double)dBRange;  // meter goes -dBRange dB -> 0dB
+   mSilenceLevel = DB_TO_LINEAR(silenceLevelDB);  // meter goes -dBRange dB -> 0dB
 
    // Clamp pre-roll so we don't play before time 0
    const auto preRoll = std::max(0.0, std::min(t0, options.preRoll));
    mRecordingSchedule = {};
    mRecordingSchedule.mPreRoll = preRoll;
    mRecordingSchedule.mLatencyCorrection =
-      (gPrefs->ReadDouble(wxT("/AudioIO/LatencyCorrection"),
-                   DEFAULT_LATENCY_CORRECTION))
-         / 1000.0;
+      AudioIOLatencyCorrection.Read() / 1000.0;
    mRecordingSchedule.mDuration = t1 - t0;
    if (options.pCrossfadeData)
       mRecordingSchedule.mCrossfadeData.swap( *options.pCrossfadeData );
@@ -2192,9 +2187,8 @@ void AudioIO::StopStream()
       // PortAudio callback can use the information that we are stopping to fade
       // out the audio.  Give PortAudio callback a chance to do so.
       mAudioThreadFillBuffersLoopRunning = false;
-      long latency;
-      gPrefs->Read(  wxT("/AudioIO/LatencyDuration"), &latency, DEFAULT_LATENCY_DURATION );
-      // If we can gracefully fade out in 200ms, with the faded-out play buffers making it through 
+      auto latency = static_cast<long>(AudioIOLatencyDuration.Read());
+      // If we can gracefully fade out in 200ms, with the faded-out play buffers making it through
       // the sound card, then do so.  If we can't, don't wait around.  Just stop quickly and accept 
       // there will be a click.
       if( mbMicroFades  && (latency < 150 ))
@@ -2449,7 +2443,7 @@ void AudioIO::StopStream()
 
    mPlaybackTracks.clear();
    mCaptureTracks.clear();
-#ifdef USE_MIDI
+#if defined(EXPERIMENTAL_MIDI_OUT) && defined(USE_MIDI)
    mMidiPlaybackTracks.clear();
 #endif
 
@@ -2586,6 +2580,16 @@ finished:
    mCachedBestRatePlaying = playing;
    mCachedBestRateCapturing = capturing;
    return retval;
+}
+
+double AudioIO::GetStreamTime()
+{
+   // Track time readout for the main thread
+
+   if( !IsStreamActive() )
+      return BAD_STREAM_TIME;
+
+   return mPlaybackSchedule.NormalizeTrackTime();
 }
 
 
@@ -3341,32 +3345,6 @@ void AudioIoCallback::FillMidiBuffers()
       OutputEvent();
       GetNextEvent();
    }
-
-   // test for end
-   double realTime = MidiTime() * 0.001 -
-                      PauseTime();
-   realTime -= 1; // MidiTime() runs ahead 1s
-
-   // XXX Is this still true now?  It seems to break looping --Poke
-   //
-   // The TrackPanel::OnTimer() method updates the time position
-   // indicator every 200ms, so it tends to not advance the
-   // indicator to the end of the selection (mT1) but instead stop
-   // up to 200ms before the end. At this point, output is shut
-   // down and the indicator is removed, but for a brief time, the
-   // indicator is clearly stopped before reaching mT1. To avoid
-   // this, we do not set mMidiOutputComplete until we are actually
-   // 0.22s beyond mT1 (even though we stop playing at mT1). This
-   // gives OnTimer() time to wake up and draw the final time
-   // position at mT1 before shutting down the stream.
-   const double loopDelay = 0.220;
-
-   auto timeAtSpeed = mPlaybackSchedule.TrackDuration(realTime);
-
-   mMidiOutputComplete =
-      (mPlaybackSchedule.PlayingStraight() && // PRL:  what if scrubbing?
-       timeAtSpeed >= mPlaybackSchedule.mT1 + loopDelay);
-   // !mNextEvent);
 }
 
 double AudioIoCallback::PauseTime()
@@ -3756,18 +3734,25 @@ void AudioIoCallback::ComputeMidiTimings(
 //   to run in the main GUI thread after the next event loop iteration.
 //   That's important, because Pause() updates GUI, such as status bar,
 //   and that should NOT happen in this audio non-gui thread.
-void AudioIoCallback::CheckSoundActivatedRecordingLevel( const void *inputBuffer )
+void AudioIoCallback::CheckSoundActivatedRecordingLevel(
+      float *inputSamples,
+      unsigned long framesPerBuffer
+   )
 {
-   if( !inputBuffer)
-      return;
    // Quick returns if next to nothing to do.
    if( !mPauseRec )
       return;
-   if( !mInputMeter )
-      return;
-   
-   bool bShouldBePaused = mInputMeter->GetMaxPeak() < mSilenceLevel;
-   if( bShouldBePaused != IsPaused())
+
+   float maxPeak = 0.;
+   for( unsigned long i = 0, cnt = framesPerBuffer * mNumCaptureChannels; i < cnt; ++i ) {
+      float sample = fabs(*(inputSamples++));
+      if (sample > maxPeak) {
+         maxPeak = sample;
+      }
+   }
+
+   bool bShouldBePaused = maxPeak < mSilenceLevel;
+   if( bShouldBePaused != IsPaused() )
    {
       auto pListener = GetListener();
       if ( pListener )
@@ -3775,13 +3760,11 @@ void AudioIoCallback::CheckSoundActivatedRecordingLevel( const void *inputBuffer
    }
 }
 
-
 // A function to apply the requested gain, fading up or down from the
 // most recently applied gain.
 void AudioIoCallback::AddToOutputChannel( unsigned int chan,
    float * outputMeterFloats,
    float * outputFloats,
-   float * tempFloats,
    float * tempBuf,
    bool drop,
    unsigned long len,
@@ -3799,7 +3782,7 @@ void AudioIoCallback::AddToOutputChannel( unsigned int chan,
    if (outputMeterFloats != outputFloats)
       for ( unsigned i = 0; i < len; ++i)
          outputMeterFloats[numPlaybackChannels*i+chan] +=
-            gain*tempFloats[i];
+            gain*tempBuf[i];
 
    if (mEmulateMixerOutputVol)
       gain *= mMixerOutputVol;
@@ -3831,8 +3814,7 @@ void ClampBuffer(float * pBuffer, unsigned long len){
 //
 bool AudioIoCallback::FillOutputBuffers(
    void *outputBuffer,
-   unsigned long framesPerBuffer,
-   float * tempFloats, float *outputMeterFloats
+   unsigned long framesPerBuffer, float *outputMeterFloats
 )
 {
    const auto numPlaybackTracks = mPlaybackTracks.size();
@@ -3994,11 +3976,13 @@ bool AudioIoCallback::FillOutputBuffers(
 
          if (vt->GetChannelIgnoringPan() == Track::LeftChannel ||
                vt->GetChannelIgnoringPan() == Track::MonoChannel )
-            AddToOutputChannel( 0, outputMeterFloats, outputFloats, tempFloats, tempBufs[c], drop, len, vt);
+            AddToOutputChannel( 0, outputMeterFloats, outputFloats,
+               tempBufs[c], drop, len, vt);
 
          if (vt->GetChannelIgnoringPan() == Track::RightChannel ||
                vt->GetChannelIgnoringPan() == Track::MonoChannel  )
-            AddToOutputChannel( 1, outputMeterFloats, outputFloats, tempFloats, tempBufs[c], drop, len, vt);
+            AddToOutputChannel( 1, outputMeterFloats, outputFloats,
+               tempBufs[c], drop, len, vt);
       }
 
       chanCnt = 0;
@@ -4234,8 +4218,7 @@ void AudioIoCallback::DoPlaythrough(
 /* Send data to recording VU meter if applicable */
 // Also computes rms
 void AudioIoCallback::SendVuInputMeterData(
-   float *tempFloats,
-   const void *inputBuffer,
+   float *inputSamples,
    unsigned long framesPerBuffer   
    )
 {
@@ -4244,8 +4227,6 @@ void AudioIoCallback::SendVuInputMeterData(
    if (!mInputMeter)
       return;
    if( mInputMeter->IsMeterDisabled())
-      return;
-   if( !inputBuffer) 
       return;
 
    // get here if meters are actually live , and being updated
@@ -4261,18 +4242,9 @@ void AudioIoCallback::SendVuInputMeterData(
    //TODO use atomics instead.
    mUpdatingMeters = true;
    if (mUpdateMeters) {
-      if (mCaptureFormat == floatSample)
          mInputMeter->UpdateDisplay(numCaptureChannels,
-                                                framesPerBuffer,
-                                                (float *)inputBuffer);
-      else {
-         CopySamples((samplePtr)inputBuffer, mCaptureFormat,
-                     (samplePtr)tempFloats, floatSample,
-                     framesPerBuffer * numCaptureChannels);
-         mInputMeter->UpdateDisplay(numCaptureChannels,
-                                                framesPerBuffer,
-                                                tempFloats);
-      }
+                                    framesPerBuffer,
+                                    inputSamples);
    }
    mUpdatingMeters = false;
 }
@@ -4432,22 +4404,35 @@ int AudioIoCallback::AudioCallback(const void *inputBuffer, void *outputBuffer,
          (float *)outputBuffer;
    // ----- END of MEMORY ALLOCATIONS ------------------------------------------
 
+   if (inputBuffer && numCaptureChannels) {
+      float *inputSamples;
 
-   SendVuInputMeterData(
-      tempFloats, 
-      inputBuffer,
-      framesPerBuffer); 
+      if (mCaptureFormat == floatSample) {
+         inputSamples = (float *) inputBuffer;
+      }
+      else {
+         CopySamples((samplePtr)inputBuffer, mCaptureFormat,
+                     (samplePtr)tempFloats, floatSample,
+                     framesPerBuffer * numCaptureChannels);
+         inputSamples = tempFloats;
+      }
 
-   // This function may queue up a pause or resume.
-   // TODO this is a bit dodgy as it toggles the Pause, and
-   // relies on an idle event to have handled that, so could 
-   // queue up multiple toggle requests and so do nothing.
-   // Eventually it will sort itself out by random luck, but
-   // the net effect is a delay in starting/stopping sound activated 
-   // recording.
-   CheckSoundActivatedRecordingLevel(
-      inputBuffer);
-  
+      SendVuInputMeterData(
+         inputSamples,
+         framesPerBuffer);
+
+      // This function may queue up a pause or resume.
+      // TODO this is a bit dodgy as it toggles the Pause, and
+      // relies on an idle event to have handled that, so could 
+      // queue up multiple toggle requests and so do nothing.
+      // Eventually it will sort itself out by random luck, but
+      // the net effect is a delay in starting/stopping sound activated 
+      // recording.
+      CheckSoundActivatedRecordingLevel(
+         inputSamples,
+         framesPerBuffer);
+   }
+
    // Even when paused, we do playthrough.
    // Initialise output buffer to zero or to playthrough data.
    // Initialise output meter values.
@@ -4466,7 +4451,6 @@ int AudioIoCallback::AudioCallback(const void *inputBuffer, void *outputBuffer,
    if( FillOutputBuffers(
          outputBuffer,
          framesPerBuffer,
-         tempFloats,
          outputMeterFloats))
       return mCallbackReturn;
 
@@ -4553,8 +4537,6 @@ void AudioIoCallback::CallbackCheckCompletion(
    if(!done) 
       return;
 
-   // PRL: singalling MIDI output complete is necessary if
-   // not USE_MIDI_THREAD, otherwise it's harmlessly redundant
 #ifdef EXPERIMENTAL_MIDI_OUT
    mMidiOutputComplete = true,
 #endif

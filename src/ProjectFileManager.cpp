@@ -10,8 +10,6 @@ Paul Licameli split from AudacityProject.cpp
 
 #include "ProjectFileManager.h"
 
-#include "Experimental.h"
-
 #include <wx/crt.h> // for wxPrintf
 
 #if defined(__WXGTK__)
@@ -23,7 +21,6 @@ Paul Licameli split from AudacityProject.cpp
 #include "PlatformCompatibility.h"
 #include "Project.h"
 #include "ProjectFileIO.h"
-#include "ProjectFileIORegistry.h"
 #include "ProjectFSCK.h"
 #include "ProjectHistory.h"
 #include "ProjectSelectionManager.h"
@@ -157,6 +154,7 @@ auto ProjectFileManager::ReadProjectFile(
    if (bParseSuccess)
    {
       if (discardAutosave)
+         // REVIEW: Failure OK?
          projectFileIO.AutoSaveDelete();
       else if (projectFileIO.IsRecovered()) {
          bool resaved = false;
@@ -220,7 +218,7 @@ bool ProjectFileManager::Save()
    // Prompt for file name?
    if (projectFileIO.IsTemporary())
    {
-      return SaveAs();
+      return SaveAs(true);
    }
 
    return DoSave(projectFileIO.GetFileName(), false);
@@ -341,6 +339,7 @@ bool ProjectFileManager::DoSave(const FilePath & fileName, const bool fromSaveAs
    if (!success)
    {
       // Show this error only if we didn't fail reconnection in SaveProject
+      // REVIEW: Could HasConnection() be true but SaveProject() still have failed?
       if (!projectFileIO.HasConnection())
          ShowErrorDialog(
             &window,
@@ -408,7 +407,7 @@ bool ProjectFileManager::SaveAs(const FilePath &newFileName, bool addToHistory /
    return(success);
 }
 
-bool ProjectFileManager::SaveAs()
+bool ProjectFileManager::SaveAs(bool allowOverwrite /* = false */)
 {
    auto &project = mProject;
    auto &projectFileIO = ProjectFileIO::Get( project );
@@ -465,7 +464,7 @@ For an audio file that will open in other apps, use 'Export'.\n");
 
       filename.SetExt(wxT("aup3"));
 
-      if (!bPrompt && filename.FileExists()) {
+      if ((!bPrompt || !allowOverwrite) && filename.FileExists()) {
          // Saving a copy of the project should never overwrite an existing project.
          AudacityMessageDialog m(
             nullptr,
@@ -585,8 +584,9 @@ bool ProjectFileManager::SaveCopy(const FilePath &fileName /* = wxT("") */)
       {
          // JKC: I removed 'wxFD_OVERWRITE_PROMPT' because we are checking
          // for overwrite ourselves later, and we disallow it.
-         // We disallow overwrite because we would have to DELETE the many
-         // smaller files too, or prompt to move them.
+         // Previously we disallowed overwrite because we would have had 
+         // to DELETE the many smaller files too, or prompt to move them.
+         // Maybe we could allow it now that we have aup3 format?
          fName = FileNames::SelectFile(FileNames::Operation::Export,
                                        title,
                                        filename.GetPath(),
@@ -747,6 +747,8 @@ void ProjectFileManager::CompactProjectOnClose()
          // without save.  Don't leave the document blob from the last
          // push of undo history, when that undo state may get purged
          // with deletion of some new sample blocks.
+         // REVIEW: UpdateSaved() might fail too.  Do we need to test 
+         // for that and report it?
          projectFileIO.UpdateSaved( mLastSavedTracks.get() );
       }
    }
@@ -758,6 +760,25 @@ bool ProjectFileManager::OpenProject()
    auto &projectFileIO = ProjectFileIO::Get(project);
 
    return projectFileIO.OpenProject();
+}
+
+bool ProjectFileManager::OpenNewProject()
+{
+   auto &project = mProject;
+   auto &projectFileIO = ProjectFileIO::Get(project);
+
+   bool bOK = OpenProject();
+   if( !bOK )
+   {
+      ShowErrorDialog(
+         nullptr,
+         XO("Can't open new empty project"),
+         XO("Error opening a new empty project"), 
+         "FAQ:Errors_opening_a_new_empty_project",
+         true, 
+         projectFileIO.GetLastLog());
+   }
+   return bOK;
 }
 
 void ProjectFileManager::CloseProject()
@@ -855,8 +876,7 @@ void ProjectFileManager::OpenFile(const FilePath &fileNameArg, bool addtohistory
    // On Win32, we may be given a short (DOS-compatible) file name on rare
    // occasions (e.g. stuff like "C:\PROGRA~1\AUDACI~1\PROJEC~1.AUP"). We
    // convert these to long file name first.
-   auto fileName = PlatformCompatibility::ConvertSlashInFileName(
-      PlatformCompatibility::GetLongFileName(fileNameArg));
+   auto fileName = PlatformCompatibility::GetLongFileName(fileNameArg);
 
    if (TempDirectory::FATFilesystemDenied(fileName,
                                       XO("Project resides on FAT formatted drive.\n"
@@ -949,8 +969,9 @@ void ProjectFileManager::OpenFile(const FilePath &fileNameArg, bool addtohistory
          {
             Import(fileName);
          }
-
-         window.ZoomAfterImport(nullptr);
+         // Bug 2743: Don't zoom with lof.
+         if (!fileName.AfterLast('.').IsSameAs(wxT("lof"), false))
+            window.ZoomAfterImport(nullptr);
 
          return;
       }
@@ -1018,7 +1039,7 @@ void ProjectFileManager::OpenFile(const FilePath &fileNameArg, bool addtohistory
 
       wxLogError(wxT("Could not parse file \"%s\". \nError: %s"), fileName, errorStr.Debug());
 
-      ShowErrorDialog(
+      projectFileIO.ShowError(
          &window,
          XO("Error Opening Project"),
          errorStr,
@@ -1133,6 +1154,29 @@ ProjectFileManager::AddImportedTracks(const FilePath &fileName,
    //   HandleResize();
 }
 
+namespace {
+bool ImportProject(AudacityProject &dest, const FilePath &fileName)
+{
+   InvisibleTemporaryProject temp;
+   auto &project = temp.Project();
+
+   auto &projectFileIO = ProjectFileIO::Get(project);
+   if (!projectFileIO.LoadProject(fileName, false))
+      return false;
+   auto &srcTracks = TrackList::Get(project);
+   auto &destTracks = TrackList::Get(dest);
+   for (const Track *pTrack : srcTracks.Any()) {
+      auto destTrack = pTrack->PasteInto(dest);
+      Track::FinishCopy(pTrack, destTrack.get());
+      if (destTrack.use_count() == 1)
+         destTracks.Add(destTrack);
+   }
+   Tags::Get(dest).Merge(Tags::Get(project));
+
+   return true;
+}
+}
+
 // If pNewTrackList is passed in non-NULL, it gets filled with the pointers to NEW tracks.
 bool ProjectFileManager::Import(
    const FilePath &fileName,
@@ -1145,10 +1189,10 @@ bool ProjectFileManager::Import(
    TrackHolders newTracks;
    TranslatableString errorMessage;
 
+#ifdef EXPERIMENTAL_IMPORT_AUP3
    // Handle AUP3 ("project") files directly
    if (fileName.AfterLast('.').IsSameAs(wxT("aup3"), false)) {
-
-      if (projectFileIO.ImportProject(fileName)) {
+      if (ImportProject(project, fileName)) {
          auto &history = ProjectHistory::Get(project);
 
          // If the project was clean and temporary (not permanently saved), then set
@@ -1166,9 +1210,20 @@ bool ProjectFileManager::Import(
             FileHistory::Global().Append(fileName);
          }
       }
+      else {
+         errorMessage = projectFileIO.GetLastError();
+         if (errorMessage.empty()) {
+            errorMessage = XO("Failed to import project");
+         }
+
+         // Additional help via a Help button links to the manual.
+         ShowErrorDialog(&GetProjectFrame( project ),XO("Error Importing"),
+                         errorMessage, wxT("Importing_Audio"));
+      }
 
       return false;
    }
+#endif
 
    {
       // Backup Tags, before the import.  Be prepared to roll back changes.
@@ -1180,12 +1235,20 @@ bool ProjectFileManager::Import(
       auto newTags = oldTags->Duplicate();
       Tags::Set( project, newTags );
 
+#ifndef EXPERIMENTAL_IMPORT_AUP3
+      // Handle AUP3 ("project") files specially
+      if (fileName.AfterLast('.').IsSameAs(wxT("aup3"), false)) {
+         ShowErrorDialog(&GetProjectFrame( project ), XO("Error Importing"),
+            XO( "Cannot import AUP3 format.  Use File > Open instead"),
+            wxT("File_Menu"));
+         return false;
+      }
+#endif
       bool success = Importer::Get().Import(project, fileName,
                                             &WaveTrackFactory::Get( project ),
                                             newTracks,
                                             newTags.get(),
                                             errorMessage);
-
       if (!errorMessage.empty()) {
          // Error message derived from Importer::Import
          // Additional help via a Help button links to the manual.

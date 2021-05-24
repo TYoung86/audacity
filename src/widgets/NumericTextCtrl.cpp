@@ -165,7 +165,7 @@ different formats.
 **********************************************************************/
 
 
-#include "../Audacity.h"
+
 #include "NumericTextCtrl.h"
 
 #include "audacity/Types.h"
@@ -182,7 +182,6 @@ different formats.
 
 #include <wx/wx.h>
 #include <wx/dcbuffer.h>
-#include <wx/dcmemory.h>
 #include <wx/font.h>
 #include <wx/intl.h>
 #include <wx/menu.h>
@@ -583,7 +582,7 @@ static const BuiltinFormatString FrequencyConverterFormats_[] = {
          * the decimal point for your locale. Don't change the numbers.
          * The decimal separator is specified using '<' if your language uses a ',' or
          * to '>' if your language uses a '.'. */
-         XO("0100000>0100 Hz")
+         XO("010,01000>0100 Hz")
          , XO("centihertz")
       }
    },
@@ -939,6 +938,8 @@ void NumericConverter::PrintDebugInfo()
    wxPrintf("\n");
 }
 
+NumericConverter::NumericConverter(const NumericConverter&) = default;
+
 NumericConverter::~NumericConverter()
 {
 }
@@ -1020,7 +1021,7 @@ void NumericConverter::ValueToControls(double rawValue, bool nearest /* = true *
    }
 
    for(i = 0; i < mFields.size(); i++) {
-      int value = -1;
+      long long value = -1;
 
       if (mFields[i].frac) {
          // JKC: This old code looks bogus to me.
@@ -1028,7 +1029,7 @@ void NumericConverter::ValueToControls(double rawValue, bool nearest /* = true *
          //value = (int)(t_frac * mFields[i].base + 0.5);  // +0.5 as rounding required
          // I did the rounding earlier.
          if (t_frac >= 0)
-            value = (int)(t_frac * mFields[i].base);
+            value = t_frac * mFields[i].base;
          // JKC: TODO: Find out what the range is supposed to do.
          // It looks bogus too.
          //if (mFields[i].range > 0)
@@ -1036,9 +1037,7 @@ void NumericConverter::ValueToControls(double rawValue, bool nearest /* = true *
       }
       else {
          if (t_int >= 0) {
-            // UNSAFE_SAMPLE_COUNT_TRUNCATION
-            // truncation danger!
-            value = (t_int.as_long_long() / mFields[i].base);
+            value = t_int.as_long_long() / mFields[i].base;
             if (mFields[i].range > 0)
                value = value % mFields[i].range;
          }
@@ -1050,7 +1049,7 @@ void NumericConverter::ValueToControls(double rawValue, bool nearest /* = true *
             field += wxT("-");
       }
       else
-         field = wxString::Format(mFields[i].formatStr, value);
+         field = wxString::Format(mFields[i].formatStr, (int) value);
       mValueString += field;
       mValueString += mFields[i].label;
    }

@@ -18,7 +18,7 @@ and libvorbis examples, Monty <monty@xiph.org>
 
 **********************************************************************/
 
-#include "../Audacity.h" // for USE_* macros
+
 
 #ifdef USE_LIBFLAC
 
@@ -460,12 +460,26 @@ bool ExportFLAC::GetMetadata(AudacityProject *project, const Tags *tags)
       if (n == TAG_YEAR) {
          n = wxT("DATE");
       }
+      else if (n == TAG_COMMENTS) {
+         // Some apps like Foobar use COMMENT and some like Windows use DESCRIPTION,
+         // so add both to try and make everyone happy.
+         n = wxT("COMMENT");
+         FLAC::Metadata::VorbisComment::Entry entry(n.mb_str(wxConvUTF8),
+                                                    v.mb_str(wxConvUTF8));
+         if (! ::FLAC__metadata_object_vorbiscomment_append_comment(mMetadata.get(),
+                                                              entry.get_entry(),
+                                                              true) ) {
+            return false;
+         }
+         n = wxT("DESCRIPTION");
+      }
       FLAC::Metadata::VorbisComment::Entry entry(n.mb_str(wxConvUTF8),
                                                  v.mb_str(wxConvUTF8));
       if (! ::FLAC__metadata_object_vorbiscomment_append_comment(mMetadata.get(),
                                                            entry.get_entry(),
-                                                           true) )
+                                                           true) ) {
          return false;
+      }
    }
 
    return true;

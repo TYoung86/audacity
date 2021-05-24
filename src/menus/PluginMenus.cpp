@@ -1,5 +1,4 @@
-#include "../Audacity.h"
-#include "../Experimental.h"
+
 
 #include "../AudioIO.h"
 #include "../BatchProcessDialog.h"
@@ -317,7 +316,7 @@ MenuTable::BaseItemPtrs PopulateEffectsMenu(
          && (plug->GetSymbol() !=
                ComponentInterfaceSymbol("Nyquist Effects Prompt"))
          && (plug->GetSymbol() != ComponentInterfaceSymbol("Nyquist Tools Prompt"))
-         && (plug->GetSymbol() != ComponentInterfaceSymbol("Nyquist Prompt"))
+         && (plug->GetSymbol() != ComponentInterfaceSymbol(NYQUIST_PROMPT_ID))
 #endif
          )
          defplugs.push_back(plug);
@@ -377,13 +376,19 @@ struct Handler : CommandHandlerObject {
 void OnResetConfig(const CommandContext &context)
 {
    auto &project = context.project;
+   auto &menuManager = MenuManager::Get(project);
+   menuManager.mLastAnalyzerRegistration = MenuCreator::repeattypenone;
+   menuManager.mLastToolRegistration = MenuCreator::repeattypenone;
+   menuManager.mLastGenerator = "";
+   menuManager.mLastEffect = "";
+   menuManager.mLastAnalyzer = "";
+   menuManager.mLastTool = "";
+
    gPrefs->DeleteAll();
 
    // Directory will be reset on next restart.
    FileNames::UpdateDefaultPath(FileNames::Operation::Temp, TempDirectory::DefaultTempDir());
-   gPrefs->Write("/GUI/SyncLockTracks", 0);
-   gPrefs->Write("/SnapTo", 0 );
-   ProjectSelectionManager::Get( project ).AS_SetSnapTo( 0 );
+
    // There are many more things we could reset here.
    // Beeds discussion as to which make sense to.
    // Maybe in future versions?
@@ -393,8 +398,9 @@ void OnResetConfig(const CommandContext &context)
    // - Reset Play-at-speed speed to x1
    // - Stop playback/recording and unapply pause.
    // - Set Zoom sensibly.
-   //ProjectSelectionManager::Get(project).AS_SetRate(44100.0);
+   gPrefs->Write("/GUI/SyncLockTracks", 0);
    gPrefs->Write("/AudioIO/SoundActivatedRecord", 0);
+   gPrefs->Write("/SelectionToolbarMode", 0);
    gPrefs->Flush();
    DoReloadPreferences(project);
    ToolManager::OnResetToolBars(context);
@@ -403,12 +409,18 @@ void OnResetConfig(const CommandContext &context)
    // In particular the Device Toolbar ends up short on next restart, 
    // if they are left out.
    gPrefs->Write(wxT("/PrefsVersion"), wxString(wxT(AUDACITY_PREFS_VERSION_STRING)));
+
    // write out the version numbers to the prefs file for future checking
    gPrefs->Write(wxT("/Version/Major"), AUDACITY_VERSION);
    gPrefs->Write(wxT("/Version/Minor"), AUDACITY_RELEASE);
    gPrefs->Write(wxT("/Version/Micro"), AUDACITY_REVISION);
 
    gPrefs->Flush();
+
+   ProjectSelectionManager::Get( project )
+      .AS_SetSnapTo(gPrefs->ReadLong("/SnapTo", SNAP_OFF));
+   ProjectSelectionManager::Get( project )
+      .AS_SetRate(gPrefs->ReadDouble("/DefaultProjectSampleRate", 44100.0));
 }
 
 void OnManageGenerators(const CommandContext &context)
@@ -429,46 +441,72 @@ void OnManageEffects(const CommandContext &context)
    DoManagePluginsMenu(project, EffectTypeProcess);
 }
 
+void OnAnalyzer2(wxCommandEvent& evt) { return; }
+
 void OnRepeatLastGenerator(const CommandContext &context)
 {
-   auto lastEffect = MenuManager::Get(context.project).mLastGenerator;
+   auto& menuManager = MenuManager::Get(context.project);
+   auto lastEffect = menuManager.mLastGenerator;
    if (!lastEffect.empty())
    {
       EffectUI::DoEffect(
-         lastEffect, context, EffectManager::kConfigured | EffectManager::kRepeatGen);
+         lastEffect, context, menuManager.mRepeatGeneratorFlags | EffectManager::kRepeatGen);
    }
 }
 
 void OnRepeatLastEffect(const CommandContext &context)
 {
-   auto lastEffect = MenuManager::Get(context.project).mLastEffect;
+   auto& menuManager = MenuManager::Get(context.project);
+   auto lastEffect = menuManager.mLastEffect;
    if (!lastEffect.empty())
    {
       EffectUI::DoEffect(
-         lastEffect, context, EffectManager::kConfigured);
+         lastEffect, context, menuManager.mRepeatEffectFlags);
    }
 }
 
-void OnRepeatLastAnalyzer(const CommandContext &context)
+void OnRepeatLastAnalyzer(const CommandContext& context)
 {
-   auto lastEffect = MenuManager::Get(context.project).mLastAnalyzer;
-   if (!lastEffect.empty())
-   {
-      EffectUI::DoEffect(
-         lastEffect, context, EffectManager::kConfigured);
-   }
-}
-
-void OnRepeatLastTool(const CommandContext &context)
-{
-   auto lastEffect = MenuManager::Get(context.project).mLastTool;
-   if (!lastEffect.empty())
-   {
-      if (!MenuManager::Get(context.project).mLastToolIsMacro)
+   auto& menuManager = MenuManager::Get(context.project);
+   switch (menuManager.mLastAnalyzerRegistration) {
+   case MenuCreator::repeattypeplugin:
+     {
+       auto lastEffect = menuManager.mLastAnalyzer;
+       if (!lastEffect.empty())
+       {
          EffectUI::DoEffect(
-            lastEffect, context, EffectManager::kConfigured);
-      else
-         OnApplyMacroDirectlyByName(context, lastEffect);
+            lastEffect, context, menuManager.mRepeatAnalyzerFlags);
+       }
+     }
+      break;
+   case MenuCreator::repeattypeunique:
+      CommandManager::Get(context.project).DoRepeatProcess(context,
+         menuManager.mLastAnalyzerRegisteredId);
+      break;
+   }
+}
+
+void OnRepeatLastTool(const CommandContext& context)
+{
+   auto& menuManager = MenuManager::Get(context.project);
+   switch (menuManager.mLastToolRegistration) {
+     case MenuCreator::repeattypeplugin:
+     {
+        auto lastEffect = menuManager.mLastTool;
+        if (!lastEffect.empty())
+        {
+           EffectUI::DoEffect(
+              lastEffect, context, menuManager.mRepeatToolFlags);
+        }
+     }
+       break;
+     case MenuCreator::repeattypeunique:
+        CommandManager::Get(context.project).DoRepeatProcess(context,
+           menuManager.mLastToolRegisteredId);
+        break;
+     case MenuCreator::repeattypeapplymacro:
+        OnApplyMacroDirectlyByName(context, menuManager.mLastTool);
+        break;
    }
 }
 
@@ -488,6 +526,7 @@ void OnManageTools(const CommandContext &context )
 void OnManageMacros(const CommandContext &context )
 {
    auto &project = context.project;
+   CommandManager::Get(project).RegisterLastTool(context);  //Register Macros as Last Tool
    auto macrosWindow =
       &project.AttachedWindows::Get< MacrosWindow >( sMacrosWindowKey );
    if (macrosWindow) {
@@ -500,6 +539,7 @@ void OnManageMacros(const CommandContext &context )
 void OnApplyMacrosPalette(const CommandContext &context )
 {
    auto &project = context.project;
+   CommandManager::Get(project).RegisterLastTool(context);  //Register Palette as Last Tool
    auto macrosWindow =
       &project.AttachedWindows::Get< MacrosWindow >( sMacrosWindowKey );
    if (macrosWindow) {
@@ -511,12 +551,14 @@ void OnApplyMacrosPalette(const CommandContext &context )
 
 void OnScreenshot(const CommandContext &context )
 {
+   CommandManager::Get(context.project).RegisterLastTool(context);  //Register Screenshot as Last Tool
    ::OpenScreenshotTools( context.project );
 }
 
 void OnBenchmark(const CommandContext &context)
 {
    auto &project = context.project;
+   CommandManager::Get(project).RegisterLastTool(context);  //Register Run Benchmark as Last Tool
    auto &window = GetProjectFrame( project );
    ::RunBenchmark( &window, project);
 }
@@ -570,19 +612,20 @@ void OnApplyMacroDirectlyByName(const CommandContext& context, const MacroID& Na
     * repeated if this menu item is chosen */
    MenuManager::ModifyUndoMenuItems( project );
 
-      TranslatableString desc;
-      EffectManager& em = EffectManager::Get();
-      auto shortDesc = em.GetCommandName(Name);
-      auto& undoManager = UndoManager::Get(project);
-      auto& commandManager = CommandManager::Get(project);
-      int cur = undoManager.GetCurrentState();
-      if (undoManager.UndoAvailable()) {
-         undoManager.GetShortDescription(cur, &desc);
-         commandManager.Modify(wxT("RepeatLastTool"), XXO("&Repeat %s")
-            .Format(desc));
-         MenuManager::Get(project).mLastTool = Name;
-         MenuManager::Get(project).mLastToolIsMacro = true;
-      }
+   TranslatableString desc;
+   EffectManager& em = EffectManager::Get();
+   auto shortDesc = em.GetCommandName(Name);
+   auto& undoManager = UndoManager::Get(project);
+   auto& commandManager = CommandManager::Get(project);
+   int cur = undoManager.GetCurrentState();
+   if (undoManager.UndoAvailable()) {
+       undoManager.GetShortDescription(cur, &desc);
+       commandManager.Modify(wxT("RepeatLastTool"), XXO("&Repeat %s")
+          .Format(desc));
+       auto& menuManager = MenuManager::Get(project);
+       menuManager.mLastTool = Name;
+       menuManager.mLastToolRegistration = MenuCreator::repeattypeapplymacro;
+   }
 
 }
 
@@ -772,10 +815,20 @@ MenuTable::BaseItemPtrs PopulateMacrosMenu( CommandFlag flags  )
 // Under /MenuBar
 namespace {
 using namespace MenuTable;
+
+const ReservedCommandFlag&
+   HasLastGeneratorFlag() { static ReservedCommandFlag flag{
+      [](const AudacityProject &project){
+         return !MenuManager::Get( project ).mLastGenerator.empty();
+      }
+   }; return flag; }
+
 BaseItemSharedPtr GenerateMenu()
 {
    // All of this is a bit hacky until we can get more things connected into
    // the plugin manager...sorry! :-(
+
+   using Options = CommandManager::Options;
 
    static BaseItemSharedPtr menu{
    ( FinderScope{ findCommandHandler },
@@ -803,7 +856,7 @@ BaseItemSharedPtr GenerateMenu()
                FN(OnRepeatLastGenerator),
                AudioIONotBusyFlag() |
                    HasLastGeneratorFlag(),
-               {}, findCommandHandler);
+               Options{}.IsGlobal(), findCommandHandler);
          }
       ),
 
@@ -831,6 +884,14 @@ AttachedItem sAttachment1{
    wxT(""),
    Shared( GenerateMenu() )
 };
+
+const ReservedCommandFlag&
+   HasLastEffectFlag() { static ReservedCommandFlag flag{
+      [](const AudacityProject &project) {
+         return !MenuManager::Get(project).mLastEffect.empty();
+      }
+   }; return flag;
+}
 
 BaseItemSharedPtr EffectMenu()
 {
@@ -885,10 +946,21 @@ AttachedItem sAttachment2{
    Shared( EffectMenu() )
 };
 
+const ReservedCommandFlag&
+   HasLastAnalyzerFlag() { static ReservedCommandFlag flag{
+      [](const AudacityProject &project) {
+         if (MenuManager::Get(project).mLastAnalyzerRegistration == MenuCreator::repeattypeunique) return true;
+         return !MenuManager::Get(project).mLastAnalyzer.empty();
+      }
+   }; return flag;
+}
+
 BaseItemSharedPtr AnalyzeMenu()
 {
    // All of this is a bit hacky until we can get more things connected into
    // the plugin manager...sorry! :-(
+
+   using Options = CommandManager::Options;
 
    static BaseItemSharedPtr menu{
    ( FinderScope{ findCommandHandler },
@@ -916,7 +988,7 @@ BaseItemSharedPtr AnalyzeMenu()
                FN(OnRepeatLastAnalyzer),
                AudioIONotBusyFlag() | TimeSelectedFlag() |
                   WaveTracksSelectedFlag() | HasLastAnalyzerFlag(),
-               {}, findCommandHandler);
+               Options{}.IsGlobal(), findCommandHandler);
          }
       ),
 
@@ -939,6 +1011,16 @@ AttachedItem sAttachment3{
    wxT(""),
    Shared( AnalyzeMenu() )
 };
+
+const ReservedCommandFlag&
+   HasLastToolFlag() { static ReservedCommandFlag flag{
+      [](const AudacityProject &project) {
+      auto& menuManager = MenuManager::Get(project);
+         if (menuManager.mLastToolRegistration == MenuCreator::repeattypeunique) return true;
+         return !menuManager.mLastTool.empty();
+      }
+   }; return flag;
+}
 
 BaseItemSharedPtr ToolsMenu()
 {
@@ -972,7 +1054,7 @@ BaseItemSharedPtr ToolsMenu()
                FN(OnRepeatLastTool),
                AudioIONotBusyFlag() |
                   HasLastToolFlag(),
-               {}, findCommandHandler );
+               Options{}.IsGlobal(), findCommandHandler );
          }
       ),
 

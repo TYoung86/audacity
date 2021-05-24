@@ -10,7 +10,7 @@ Paul Licameli split from AudacityProject.cpp
 
 #include "ProjectManager.h"
 
-#include "Experimental.h"
+
 
 #include "AdornedRulerPanel.h"
 #include "AudioIO.h"
@@ -36,7 +36,7 @@ Paul Licameli split from AudacityProject.cpp
 #include "wxFileNameWrapper.h"
 #include "import/Import.h"
 #include "import/ImportMIDI.h"
-#include "prefs/QualityPrefs.h"
+#include "prefs/QualitySettings.h"
 #include "toolbars/MixerToolBar.h"
 #include "toolbars/SelectionBar.h"
 #include "toolbars/SpectralSelectionBar.h"
@@ -350,6 +350,10 @@ private:
 
 #endif
 
+#ifdef EXPERIMENTAL_NOTEBOOK
+   extern void AddPages(   AudacityProject * pProj, GuiFactory & Factory,  wxNotebook  * pNotebook );
+#endif
+
 void InitProjectWindow( ProjectWindow &window )
 {
    auto &project = window.GetProject();
@@ -537,17 +541,19 @@ AudacityProject *ProjectManager::New()
    auto &window = ProjectWindow::Get( *p );
    InitProjectWindow( window );
 
+   // wxGTK3 seems to need to require creating the window using default position
+   // and then manually positioning it.
+   window.SetPosition(wndRect.GetPosition());
+
    auto &projectFileManager = ProjectFileManager::Get( *p );
-   projectFileManager.OpenProject();
+
+   // This may report an error.
+   projectFileManager.OpenNewProject();
 
    MenuManager::Get( project ).CreateMenusAndCommands( project );
    
    projectHistory.InitialState();
    projectManager.RestartTimer();
-   
-   // wxGTK3 seems to need to require creating the window using default position
-   // and then manually positioning it.
-   window.SetPosition(wndRect.GetPosition());
    
    if(bMaximized) {
       window.Maximize(true);
@@ -895,15 +901,25 @@ void ProjectManager::OpenFiles(AudacityProject *proj)
 AudacityProject *ProjectManager::OpenProject(
    AudacityProject *pProject, const FilePath &fileNameArg, bool addtohistory)
 {
+   bool success = false;
    AudacityProject *pNewProject = nullptr;
    if ( ! pProject )
       pProject = pNewProject = New();
    auto cleanup = finally( [&] {
-      if( pNewProject )
+      if ( pNewProject )
          GetProjectFrame( *pNewProject ).Close(true);
+      else if ( !success )
+         // Ensure that it happens here: don't wait for the application level
+         // exception handler, because the exception may be intercepted
+         ProjectHistory::Get(*pProject).RollbackState();
+      // Any exception now continues propagating
    } );
    ProjectFileManager::Get( *pProject ).OpenFile( fileNameArg, addtohistory );
+
+   // The above didn't throw, so change what finally will do
+   success = true;
    pNewProject = nullptr;
+
    auto &projectFileIO = ProjectFileIO::Get( *pProject );
    if( projectFileIO.IsRecovered() ) {
       auto &window = ProjectWindow::Get( *pProject );
@@ -1036,10 +1052,9 @@ int ProjectManager::GetEstimatedRecordingMinsLeftOnDisk(long lCaptureChannels) {
    auto &project = mProject;
 
    // Obtain the current settings
-   auto oCaptureFormat = QualityPrefs::SampleFormatChoice();
-   if (lCaptureChannels == 0) {
-      gPrefs->Read(wxT("/AudioIO/RecordChannels"), &lCaptureChannels, 2L);
-   }
+   auto oCaptureFormat = QualitySettings::SampleFormatChoice();
+   if (lCaptureChannels == 0)
+      lCaptureChannels = AudioIORecordChannels.Read();
 
    // Find out how much free space we have on disk
    wxLongLong lFreeSpace = ProjectFileIO::Get( project ).GetFreeDiskSpace();

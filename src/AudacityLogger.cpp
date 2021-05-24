@@ -14,10 +14,10 @@ Provides thread-safe logging based on the wxWidgets log facility.
 *//*******************************************************************/
 
 
-#include "Audacity.h" // This should always be included first
+
 #include "AudacityLogger.h"
 
-#include "Experimental.h"
+
 
 #include "FileNames.h"
 #include "Internat.h"
@@ -31,6 +31,7 @@ Provides thread-safe logging based on the wxWidgets log facility.
 #include <wx/icon.h>
 #include <wx/settings.h>
 #include <wx/textctrl.h>
+#include <wx/tokenzr.h>
 
 #include "../images/AudacityLogoAlpha.xpm"
 #include "widgets/AudacityMessageBox.h"
@@ -77,6 +78,8 @@ AudacityLogger::AudacityLogger()
    mText = NULL;
    mUpdated = false;
 }
+
+AudacityLogger::~AudacityLogger()  = default;
 
 void AudacityLogger::Flush()
 {
@@ -237,12 +240,23 @@ void AudacityLogger::Show(bool show)
    Flush();
 }
 
-#if defined(EXPERIMENTAL_CRASH_REPORT)
-wxString AudacityLogger::GetLog()
+wxString AudacityLogger::GetLog(int count)
 {
-   return mBuffer;
+   if (count == 0)
+   {
+      return mBuffer;
+   }
+
+   wxString buffer;
+
+   auto lines = wxStringTokenize(mBuffer, wxT("\r\n"), wxTOKEN_RET_DELIMS);
+   for (int index = lines.size() - 1; index >= 0 && count > 0; --index, --count)
+   {
+      buffer.Prepend(lines[index]);
+   }
+
+   return buffer;
 }
-#endif
 
 void AudacityLogger::OnCloseWindow(wxCloseEvent & WXUNUSED(e))
 {
@@ -294,3 +308,16 @@ void AudacityLogger::OnSave(wxCommandEvent & WXUNUSED(e))
    }
 }
 
+void AudacityLogger::UpdatePrefs()
+{
+   if (mFrame) {
+      bool shown = mFrame->IsShown();
+      if (shown) {
+         Show(false);
+      }
+      mFrame.reset();
+      if (shown) {
+         Show(true);
+      }
+   }
+}

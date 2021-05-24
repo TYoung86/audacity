@@ -1,5 +1,4 @@
-#include "../Audacity.h" // for USE_* macros
-#include "../Experimental.h"
+
 
 #include "../CommonCommandFlags.h"
 #include "../FileNames.h"
@@ -61,6 +60,10 @@ void DoExport(AudacityProject &project, const FileExtension &format)
       success = e.Process(false, t0, t1);
    }
    else {
+      // We either use a configured output path,
+      // or we use the default documents folder - just as for exports.
+      FilePath pathName = FileNames::FindDefaultPath(FileNames::Operation::MacrosOut);
+/*
       // If we've gotten to this point, we are in batch mode, have a file format,
       // and the project has either been saved or a file has been imported. So, we
       // want to use the project's path if it has been saved, otherwise use the
@@ -68,6 +71,7 @@ void DoExport(AudacityProject &project, const FileExtension &format)
       FilePath pathName = !projectFileIO.IsTemporary() ?
                            wxPathOnly(projectFileIO.GetFileName()) :
                            project.GetInitialImportPath();
+*/
       wxFileName fileName(pathName, projectName, format.Lower());
 
       // Append the "macro-output" directory to the path
@@ -105,6 +109,53 @@ void DoExport(AudacityProject &project, const FileExtension &format)
 
    if (success && !project.mBatchMode) {
       FileHistory::Global().Append(e.GetAutoExportFileName().GetFullPath());
+   }
+}
+
+void DoImport(const CommandContext &context, bool isRaw)
+{
+   auto &project = context.project;
+   auto &trackFactory = WaveTrackFactory::Get( project );
+   auto &window = ProjectWindow::Get( project );
+
+   auto selectedFiles = ProjectFileManager::ShowOpenDialog(FileNames::Operation::Import);
+   if (selectedFiles.size() == 0) {
+      Importer::SetLastOpenType({});
+      return;
+   }
+
+   // PRL:  This affects FFmpegImportPlugin::Open which resets the preference
+   // to false.  Should it also be set to true on other paths that reach
+   // AudacityProject::Import ?
+   gPrefs->Write(wxT("/NewImportingSession"), true);
+
+   selectedFiles.Sort(FileNames::CompareNoCase);
+
+   auto cleanup = finally( [&] {
+
+      Importer::SetLastOpenType({});
+      window.ZoomAfterImport(nullptr);
+      window.HandleResize(); // Adjust scrollers for NEW track sizes.
+   } );
+
+   for (size_t ff = 0; ff < selectedFiles.size(); ff++) {
+      wxString fileName = selectedFiles[ff];
+
+      FileNames::UpdateDefaultPath(FileNames::Operation::Import, ::wxPathOnly(fileName));
+
+      if (isRaw) {
+         TrackHolders newTracks;
+
+         ::ImportRaw(project, &window, fileName, &trackFactory, newTracks);
+
+         if (newTracks.size() > 0) {
+            ProjectFileManager::Get( project )
+               .AddImportedTracks(fileName, std::move(newTracks));
+         }
+      }
+      else {
+         ProjectFileManager::Get( project ).Import(fileName);
+      }
    }
 }
 
@@ -367,36 +418,7 @@ void OnExportMIDI(const CommandContext &context)
 
 void OnImport(const CommandContext &context)
 {
-   auto &project = context.project;
-   auto &window = ProjectWindow::Get( project );
-
-   auto selectedFiles = ProjectFileManager::ShowOpenDialog(FileNames::Operation::Import);
-   if (selectedFiles.size() == 0) {
-      Importer::SetLastOpenType({});
-      return;
-   }
-
-   // PRL:  This affects FFmpegImportPlugin::Open which resets the preference
-   // to false.  Should it also be set to true on other paths that reach
-   // AudacityProject::Import ?
-   gPrefs->Write(wxT("/NewImportingSession"), true);
-
-   selectedFiles.Sort(FileNames::CompareNoCase);
-
-   auto cleanup = finally( [&] {
-      Importer::SetLastOpenType({});
-      window.HandleResize(); // Adjust scrollers for NEW track sizes.
-   } );
-
-   for (size_t ff = 0; ff < selectedFiles.size(); ff++) {
-      wxString fileName = selectedFiles[ff];
-
-      FileNames::UpdateDefaultPath(FileNames::Operation::Import, ::wxPathOnly(fileName));
-
-      ProjectFileManager::Get( project ).Import(fileName);
-   }
-
-   window.ZoomAfterImport(nullptr);
+   DoImport(context, false);
 }
 
 void OnImportLabels(const CommandContext &context)
@@ -475,33 +497,7 @@ void OnImportMIDI(const CommandContext &context)
 
 void OnImportRaw(const CommandContext &context)
 {
-   auto &project = context.project;
-   auto &trackFactory = WaveTrackFactory::Get( project );
-   auto &window = ProjectWindow::Get( project );
-
-   wxString fileName =
-       FileNames::SelectFile(FileNames::Operation::Open,
-         XO("Select any uncompressed audio file"),
-         wxEmptyString,     // Path
-         wxT(""),       // Name
-         wxT(""),       // Extension
-         { FileNames::AllFiles },
-         wxRESIZE_BORDER,        // Flags
-         &window);    // Parent
-
-   if (fileName.empty())
-      return;
-
-   TrackHolders newTracks;
-
-   ::ImportRaw(project, &window, fileName, &trackFactory, newTracks);
-
-   if (newTracks.size() <= 0)
-      return;
-
-   ProjectFileManager::Get( project )
-      .AddImportedTracks(fileName, std::move(newTracks));
-   window.HandleResize(); // Adjust scrollers for NEW track sizes.
+   DoImport(context, true);
 }
 
 void OnPageSetup(const CommandContext &context)
@@ -651,8 +647,7 @@ BaseItemSharedPtr FileMenu()
             // Enable Export Selection commands only when there's a selection.
             Command( wxT("ExportSel"), XXO("Expo&rt Selected Audio..."),
                FN(OnExportSelection),
-               AudioIONotBusyFlag() | TimeSelectedFlag() | WaveTracksSelectedFlag(),
-               Options{}.UseStrictFlags() ),
+               AudioIONotBusyFlag() | TimeSelectedFlag() | WaveTracksSelectedFlag() ),
 
             Command( wxT("ExportLabels"), XXO("Export &Labels..."),
                FN(OnExportLabels),

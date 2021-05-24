@@ -14,10 +14,10 @@
 *//*******************************************************************/
 
 
-#include "Audacity.h" // for USE_* macros
+
 #include "NoteTrack.h"
 
-#include "Experimental.h"
+
 
 #include <wx/wxcrtvararg.h>
 #include <wx/dc.h>
@@ -635,6 +635,7 @@ void NoteTrack::InsertSilence(double t, double len)
    // AddToDuration( len );
 }
 
+#ifdef EXPERIMENTAL_MIDI_OUT
 void NoteTrack::SetVelocity(float velocity)
 {
    if (mVelocity != velocity) {
@@ -642,6 +643,7 @@ void NoteTrack::SetVelocity(float velocity)
       Notify();
    }
 }
+#endif
 
 // Call this function to manipulate the underlying sequence data. This is
 // NOT the function that handles horizontal dragging.
@@ -681,6 +683,13 @@ QuantizedTimeAndBeat NoteTrack::NearestBeatTime( double time ) const
    seq_time = seq.nearest_beat_time(seq_time, &beat);
    // add the offset back in to get "actual" audacity track time
    return { seq_time + GetOffset(), beat };
+}
+
+Track::Holder NoteTrack::PasteInto( AudacityProject & ) const
+{
+   auto pNewTrack = std::make_shared<NoteTrack>();
+   pNewTrack->Paste(0.0, this);
+   return pNewTrack;
 }
 
 auto NoteTrack::GetIntervals() const -> ConstIntervals

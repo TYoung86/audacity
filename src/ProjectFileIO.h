@@ -52,7 +52,7 @@ wxDECLARE_EXPORTED_EVENT( AUDACITY_DLL_API,
 
 ///\brief Object associated with a project that manages reading and writing
 /// of Audacity project file formats, and autosave
-class ProjectFileIO final
+class AUDACITY_DLL_API ProjectFileIO final
    : public ClientData::Base
    , public XMLTagHandler
    , private PrefsListener
@@ -92,7 +92,6 @@ public:
    bool CloseProject();
    bool ReopenProject();
 
-   bool ImportProject(const FilePath &fileName);
    bool LoadProject(const FilePath &fileName, bool ignoreAutosave);
    bool UpdateSaved(const TrackList *tracks = nullptr);
    bool SaveProject(const FilePath &fileName, const TrackList *lastSaved);
@@ -115,8 +114,15 @@ public:
    // specific database. This is the workhorse for the above 3 methods.
    static int64_t GetDiskUsage(DBConnection &conn, SampleBlockID blockid);
 
-   const TranslatableString &GetLastError();
-   const TranslatableString &GetLibraryError();
+   // Displays an error dialog with a button that offers help
+   void ShowError(wxWindow *parent,
+                  const TranslatableString &dlogTitle,
+                  const TranslatableString &message,
+                  const wxString &helpPage);
+   const TranslatableString &GetLastError() const;
+   const TranslatableString &GetLibraryError() const;
+   int GetLastErrorCode() const;
+   const wxString &GetLastLog() const;
 
    // Provides a means to bypass "DELETE"s at shutdown if the database
    // is just going to be deleted anyway.  This prevents a noticeable
@@ -190,6 +196,9 @@ public:
    //! Return a reference to a connection, creating it as needed on demand; throw on failure
    DBConnection &GetConnection();
 
+   //! Return a strings representation of the active project XML doc
+   wxString GenerateDoc();
+
 private:
    void OnCheckpointFailure();
 
@@ -254,11 +263,13 @@ private:
 
    //! Just set stored errors
    void SetError(const TranslatableString & msg,
-      const TranslatableString &libraryError = {});
+       const TranslatableString& libraryError = {},
+       int errorCode = {});
 
    //! Set stored errors and write to log; and default libraryError to what database library reports
    void SetDBError(const TranslatableString & msg,
-      const TranslatableString &libraryError = {});
+       const TranslatableString& libraryError = {},
+       int errorCode = -1);
 
    bool ShouldCompact(const std::vector<const TrackList *> &tracks);
 
@@ -316,7 +327,7 @@ wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
                          EVT_PROJECT_TITLE_CHANGE, wxCommandEvent);
 
 //! Makes a temporary project that doesn't display on the screen
-class InvisibleTemporaryProject
+class AUDACITY_DLL_API InvisibleTemporaryProject
 {
 public:
    InvisibleTemporaryProject();

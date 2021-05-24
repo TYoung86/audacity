@@ -239,7 +239,7 @@ private:
    ///
    /// MM: Now that each wave track can contain multiple clips, we don't
    /// have a continuous space of samples anymore, but we simulate it,
-   /// because there are alot of places (e.g. effects) using this interface.
+   /// because there are a lot of places (e.g. effects) using this interface.
    /// This interface makes much sense for modifying samples, but note that
    /// it is not time-accurate, because the "offset" is a double value and
    /// therefore can lie inbetween samples. But as long as you use the
@@ -537,6 +537,8 @@ private:
       std::shared_ptr<WaveClip> pClip;
    };
 
+   Track::Holder PasteInto( AudacityProject & ) const override;
+
    ConstIntervals GetIntervals() const override;
    Intervals GetIntervals() override;
 
@@ -594,7 +596,7 @@ private:
 // the contents of the WaveTrack are known not to change.  It can replace
 // repeated calls to WaveTrack::Get() (each of which opens and closes at least
 // one block file).
-class WaveTrackCache {
+class AUDACITY_DLL_API WaveTrackCache {
 public:
    WaveTrackCache()
       : mBufferSize(0)

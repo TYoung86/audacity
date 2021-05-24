@@ -12,12 +12,10 @@
 #ifndef __AUDACITY_WAVECLIP__
 #define __AUDACITY_WAVECLIP__
 
-#include "Audacity.h"
+
 
 #include "SampleFormat.h"
 #include "xml/XMLTagHandler.h"
-
-#include "RealFFTf.h"
 
 #include <wx/longlong.h>
 
@@ -36,7 +34,7 @@ class WaveCache;
 class WaveTrackCache;
 class wxFileNameWrapper;
 
-class SpecCache {
+class AUDACITY_DLL_API SpecCache {
 public:
 
    // Make invalid cache

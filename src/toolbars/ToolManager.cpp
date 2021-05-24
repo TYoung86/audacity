@@ -24,10 +24,9 @@
 
 *//**********************************************************************/
 
-#include "../Audacity.h"
+
 #include "ToolManager.h"
 
-#include "../Experimental.h"
 #include "../commands/CommandContext.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
@@ -95,7 +94,15 @@ ToolFrame::ToolFrame
 
    // Transfer the bar to the ferry
    bar->Reparent(this);
-   SetMinSize(bar->GetDockedSize());
+
+   // Bug 2120 (comment 6 residual): No need to set a minimum size
+   // if the toolbar is not resizable. On GTK, setting a minimum
+   // size will prevent the frame from shrinking if the toolbar gets
+   // reconfigured and needs to resize smaller.
+   if (bar->IsResizable())
+   {
+      SetMinSize(bar->GetDockedSize());
+   }
 
    {
       // We use a sizer to maintain proper spacing
@@ -1202,6 +1209,8 @@ void ToolManager::OnMouse( wxMouseEvent & event )
             if (mPrevDock)
                mPrevDock->GetConfiguration().Remove( mDragBar );
             UndockBar(mp);
+            // Rearrange the remaining toolbars before trying to re-insert this one.
+            LayoutToolBars();
          }
       }
 
@@ -1519,7 +1528,12 @@ void ToolManager::HandleEscapeKey()
 
 void ToolManager::DoneDragging()
 {
-   // Done dragging
+   // Done dragging - ensure grabber button isn't pushed
+   if( mDragBar )
+   {
+      mDragBar->SetDocked( mDragBar->GetDock(), false );
+   }
+
    // Release capture
    auto &window = GetProjectFrame( *mParent );
    if( window.HasCapture() )

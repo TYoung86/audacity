@@ -12,9 +12,9 @@
 #ifndef __AUDACITY_TRACK__
 #define __AUDACITY_TRACK__
 
-#include "Audacity.h" // for USE_* macros
 
-#include "Experimental.h"
+
+
 
 #include <vector>
 #include <list>
@@ -182,7 +182,7 @@ private:
 };
 
 //! Optional extra information about an interval, appropriate to a subtype of Track
-struct TrackIntervalData {
+struct AUDACITY_DLL_API TrackIntervalData {
    virtual ~TrackIntervalData();
 };
 
@@ -318,6 +318,15 @@ class AUDACITY_DLL_API Track /* not final */
    using ConstInterval = ConstTrackInterval;
    using ConstIntervals = std::vector< ConstInterval >;
 
+   //! Whether this track type implements cut-copy-paste; by default, true
+   virtual bool SupportsBasicEditing() const;
+
+   using Holder = std::shared_ptr<Track>;
+
+   //! Find or create the destination track for a paste, maybe in a different project
+   /*! @return A smart pointer to the track; its `use_count()` can tell whether it is new */
+   virtual Holder PasteInto( AudacityProject & ) const = 0;
+
    //! Report times on the track where important intervals begin and end, for UI to snap to
    /*!
    Some intervals may be empty, and no ordering of the intervals is assumed.
@@ -390,7 +399,6 @@ private:
 
    void Init(const Track &orig);
 
-   using Holder = std::shared_ptr<Track>;
    // public nonvirtual duplication function that invokes Clone():
    virtual Holder Duplicate() const;
 
@@ -484,7 +492,7 @@ private:
    struct Executor{};
 
    //! Helper for recursive case of metafunction implementing Track::TypeSwitch
-   /*! Mutually recursive (in compile time) with tempate Track::Executor. */
+   /*! Mutually recursive (in compile time) with template Track::Executor. */
    struct Dispatcher {
       //! First, recursive case of metafunction, defers generation of operator ()
       template< typename R, typename ConcreteType,
@@ -1247,7 +1255,7 @@ wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
 /*! @brief A flat linked list of tracks supporting Add,  Remove,
  * Clear, and Contains, serialization of the list of tracks, event notifications
  */
-class TrackList final
+class AUDACITY_DLL_API TrackList final
    : public wxEvtHandler
    , public ListOfTracks
    , public std::enable_shared_from_this<TrackList>
